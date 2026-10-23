@@ -1,0 +1,322 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  background-color: #030406;
+  color: #b8d2ff;
+  font-family: "Consolas", "SFMono-Regular", Menlo, monospace;
+  overflow: hidden;
+  user-select: none;
+}
+
+canvas {
+  display: block;
+  box-shadow: 0 0 40px rgba(0, 0, 0, 0.9);
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* Panel flotante de controles */
+.ui-panel {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  width: 325px;
+  max-height: calc(100vh - 28px);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  background: rgba(6, 9, 15, 0.88);
+  border: 1px solid rgba(75, 125, 205, 0.32);
+  border-radius: 6px;
+  padding: 12px 14px;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.75);
+  z-index: 100;
+  font-size: 11.5px;
+}
+
+.ui-panel::-webkit-scrollbar {
+  width: 5px;
+}
+
+.ui-panel::-webkit-scrollbar-thumb {
+  background: rgba(90, 145, 230, 0.35);
+  border-radius: 3px;
+}
+
+.ui-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid rgba(75, 125, 205, 0.25);
+}
+
+.ui-title {
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  color: #e6f2ff;
+  font-size: 11px;
+}
+
+.ui-hide-btn {
+  background: rgba(35, 65, 115, 0.45);
+  color: #c8e0ff;
+  border: 1px solid rgba(95, 155, 245, 0.4);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-family: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.ui-hide-btn:hover {
+  background: rgba(60, 110, 190, 0.65);
+}
+
+.ui-telemetry {
+  background: rgba(12, 20, 34, 0.75);
+  border: 1px solid rgba(70, 120, 200, 0.2);
+  border-radius: 4px;
+  padding: 6px 10px;
+  margin-bottom: 10px;
+  height: 54px;
+  min-height: 54px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  overflow: hidden;
+}
+
+.ui-telemetry-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ui-telemetry-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  padding: 2px 7px;
+  border-radius: 3px;
+  background: rgba(70, 140, 255, 0.2);
+  color: #cbe0ff;
+  border: 1px solid rgba(110, 175, 255, 0.35);
+  text-transform: uppercase;
+}
+
+.ui-telemetry-badge[data-status="transition"] {
+  background: rgba(230, 175, 45, 0.18);
+  color: #ffe89e;
+  border-color: rgba(230, 175, 45, 0.4);
+}
+
+.ui-telemetry-badge[data-status="paused"] {
+  background: rgba(160, 160, 170, 0.18);
+  color: #d8d8e5;
+  border-color: rgba(160, 160, 170, 0.35);
+}
+
+.ui-telemetry-corner {
+  color: #9ec2f8;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.ui-stats-line {
+  color: #7d9ecb;
+  font-size: 10px;
+  letter-spacing: 0.2px;
+}
+
+.ui-actions {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 5px;
+  margin-bottom: 12px;
+}
+
+.ui-btn {
+  background: rgba(30, 54, 96, 0.5);
+  color: #d4e6ff;
+  border: 1px solid rgba(90, 145, 230, 0.35);
+  border-radius: 4px;
+  padding: 5px 4px;
+  font-family: inherit;
+  font-size: 10px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ui-btn:hover {
+  background: rgba(55, 100, 175, 0.7);
+  border-color: rgba(135, 190, 255, 0.65);
+}
+
+.ui-btn.active {
+  background: rgba(65, 130, 230, 0.45);
+  border-color: rgba(145, 200, 255, 0.8);
+  color: #ffffff;
+}
+
+.ui-btn.tv-btn {
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  background: rgba(30, 54, 96, 0.5);
+  border: 1px solid rgba(90, 145, 230, 0.35);
+  color: #d4e6ff;
+}
+
+.ui-btn.tv-btn:hover {
+  background: rgba(55, 100, 175, 0.7);
+  border-color: rgba(135, 190, 255, 0.65);
+}
+
+.ui-btn.tv-btn.tv-active {
+  background: rgba(18, 90, 60, 0.65);
+  border-color: rgba(60, 230, 140, 0.8);
+  color: #dffff0;
+  box-shadow: 0 0 10px rgba(60, 230, 140, 0.35);
+}
+
+.ui-perf-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 5px;
+  margin-bottom: 4px;
+}
+
+.ui-perf-btn {
+  text-align: left;
+  padding: 6px 7px;
+  font-weight: 600;
+  font-size: 9.8px;
+  background: rgba(24, 46, 86, 0.58);
+  border-color: rgba(95, 160, 250, 0.38);
+}
+
+.ui-perf-btn.perf-flash {
+  background: rgba(95, 175, 255, 0.78);
+  border-color: #ffffff;
+  color: #ffffff;
+  box-shadow: 0 0 12px rgba(120, 200, 255, 0.75);
+}
+
+.ui-perf-btn.active {
+  background: rgba(22, 105, 85, 0.72);
+  border-color: rgba(80, 240, 185, 0.85);
+  color: #e6fff7;
+  box-shadow: 0 0 10px rgba(65, 225, 170, 0.35);
+}
+
+.ui-presets-row {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+  margin-top: 5px;
+  margin-bottom: 8px;
+}
+
+.ui-preset-btn {
+  background: rgba(25, 45, 80, 0.45);
+  border: 1px solid rgba(80, 130, 210, 0.3);
+  color: #c0d8ff;
+  border-radius: 3px;
+  padding: 4px 6px;
+  font-family: inherit;
+  font-size: 9.5px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: center;
+}
+
+.ui-preset-btn:hover {
+  background: rgba(50, 95, 175, 0.65);
+  border-color: rgba(120, 180, 255, 0.6);
+  color: #ffffff;
+}
+
+.ui-section {
+  margin-bottom: 12px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(65, 105, 170, 0.2);
+}
+
+.ui-section-title {
+  color: #8ab8ff;
+  font-weight: 700;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+.ui-control-row {
+  margin-bottom: 7px;
+}
+
+.ui-label-line {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 2px;
+  color: #b4ccf0;
+  font-size: 11px;
+}
+
+.ui-val {
+  color: #eaf4ff;
+  font-weight: 600;
+}
+
+.ui-slider {
+  width: 100%;
+  height: 4px;
+  appearance: none;
+  background: rgba(45, 75, 125, 0.55);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+.ui-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #8cc0ff;
+  border: 1px solid #eef7ff;
+  box-shadow: 0 0 6px rgba(110, 175, 255, 0.8);
+  cursor: pointer;
+}
+
+.ui-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 6px;
+  color: #b4ccf0;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.ui-checkbox-row input {
+  accent-color: #68a8ff;
+  cursor: pointer;
+}
