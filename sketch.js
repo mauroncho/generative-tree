@@ -162,6 +162,81 @@ function setup() {
 	});
 
 	resetSimulation();
+	initMidiIntegration();
+}
+
+/**
+ * Crea un adaptador desacoplado para que el subsistema MIDI pueda leer/modificar
+ * parámetros y disparar acciones performáticas sincronizando UI y salida CRT (TVBridge).
+ */
+function initMidiIntegration() {
+	const midiAdapter = {
+		uiPanel: appState.uiPanel,
+		getParamValue: (key) => CONFIG[key],
+		setParamValue: (key, val) => {
+			if (!(key in CONFIG)) return;
+			CONFIG[key] = val;
+
+			if (appState.uiPanel) {
+				if (typeof val === "boolean") {
+					appState.uiPanel.syncCheckboxes();
+				} else {
+					appState.uiPanel.updateSlider(key, val);
+				}
+			}
+
+			if (appState.tvBridge) {
+				appState.tvBridge.sendParam(key, val);
+			}
+
+			if (
+				(key === "canvasWidth" || key === "canvasHeight") &&
+				!CONFIG.fullScreen
+			) {
+				applyCanvasDimensions(CONFIG.canvasWidth, CONFIG.canvasHeight);
+			}
+		},
+		triggerAction: (actionKey) => {
+			switch (actionKey) {
+				case "reset":
+					resetSimulation();
+					if (appState.tvBridge) appState.tvBridge.sendAction("reset");
+					break;
+				case "nextCorner":
+					appState.growthManager.triggerNextCorner();
+					if (appState.tvBridge) appState.tvBridge.sendAction("nextCorner");
+					break;
+				case "burst2":
+					triggerBurstAction(2, 1);
+					break;
+				case "burst3":
+					triggerBurstAction(3, 2);
+					break;
+				case "burst4":
+					triggerBurstAction(4, 3);
+					break;
+				case "bloom":
+					triggerBloomAction();
+					break;
+				case "shock":
+					triggerElectricShockAction();
+					break;
+				case "toggleSimultaneous":
+					toggleSimultaneousMode(true);
+					break;
+				case "save":
+					saveHighResPNG();
+					if (appState.tvBridge) appState.tvBridge.sendAction("save");
+					break;
+			}
+		},
+	};
+
+	if (window.MidiSystem) {
+		window.MidiSystem.connectSketch(midiAdapter);
+	} else {
+		window.pendingSketchMidiAdapter = midiAdapter;
+	}
 }
 
 /**

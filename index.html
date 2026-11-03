@@ -5,6 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Lichtenberg / Mycelium - Ramificación Orgánica</title>
   <link rel="stylesheet" href="css/style.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "webmidi": "./js/vendor/webmidi.esm.js"
+      }
+    }
+  </script>
   <script src="js/p5.min.js"></script>
 </head>
 <body>
@@ -14,5 +21,6 @@
   <script src="js/TVBridge.js"></script>
   <script src="js/UIPanel.js"></script>
   <script src="sketch.js"></script>
+  <script type="module" src="js/midi/index.js"></script>
 </body>
 </html>
