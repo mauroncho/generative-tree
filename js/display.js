@@ -99,9 +99,17 @@ function setup() {
 		} else if (action === "burst") {
 			displayState.growthManager.triggerSimultaneousBurst(data?.count || 2);
 		} else if (action === "bloom") {
-			displayState.growthManager.triggerBloom();
+			if (data?.isSustained) {
+				displayState.growthManager.setBloomSustained(data.isHeld);
+			} else {
+				displayState.growthManager.triggerBloom();
+			}
 		} else if (action === "shock") {
-			displayState.growthManager.triggerElectricShock();
+			if (data?.isSustained) {
+				displayState.growthManager.setShockSustained(data.isHeld);
+			} else {
+				displayState.growthManager.triggerElectricShock();
+			}
 		} else if (action === "save") {
 			saveHighResPNG();
 		} else if (action === "toggleFullScreen") {
@@ -279,11 +287,11 @@ function keyPressed() {
 		if (displayState.bridge)
 			displayState.bridge.sendAction("burst", { count: 4 });
 	} else if (key === "4") {
-		displayState.growthManager.triggerBloom();
-		if (displayState.bridge) displayState.bridge.sendAction("bloom");
+		displayState.growthManager.setBloomSustained(true);
+		if (displayState.bridge) displayState.bridge.sendAction("bloom", { isSustained: true, isHeld: true });
 	} else if (key === "5") {
-		displayState.growthManager.triggerElectricShock();
-		if (displayState.bridge) displayState.bridge.sendAction("shock");
+		displayState.growthManager.setShockSustained(true);
+		if (displayState.bridge) displayState.bridge.sendAction("shock", { isSustained: true, isHeld: true });
 	} else if (key === "6") {
 		TV_CONFIG.simultaneousMode = !TV_CONFIG.simultaneousMode;
 		if (TV_CONFIG.simultaneousMode) {
@@ -306,7 +314,18 @@ function keyPressed() {
 	}
 }
 
+function keyReleased() {
+	if (key === "4") {
+		displayState.growthManager.setBloomSustained(false);
+		if (displayState.bridge) displayState.bridge.sendAction("bloom", { isSustained: true, isHeld: false });
+	} else if (key === "5") {
+		displayState.growthManager.setShockSustained(false);
+		if (displayState.bridge) displayState.bridge.sendAction("shock", { isSustained: true, isHeld: false });
+	}
+}
+
 window.setup = setup;
 window.draw = draw;
 window.keyPressed = keyPressed;
+window.keyReleased = keyReleased;
 window.windowResized = windowResized;

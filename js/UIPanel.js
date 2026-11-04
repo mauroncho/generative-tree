@@ -592,6 +592,19 @@ class UIPanel {
     }
   }
 
+    setPerformativeBtnState(num, isHeld) {
+    if (!this.perfButtons || !this.perfButtons[num]) {
+      return;
+    }
+    const btn = this.perfButtons[num];
+    if (isHeld) {
+      if (btn._flashTimeout) clearTimeout(btn._flashTimeout);
+      btn.classList.add("perf-flash");
+    } else {
+      btn.classList.remove("perf-flash");
+    }
+  }
+
   /**
    * Ilumina brevemente un botón performático ([1] a [5]) cuando se dispara por teclado o clic.
    */

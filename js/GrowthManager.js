@@ -18,6 +18,10 @@ class GrowthManager {
     this.lastBatchCount = 1;
     this.shockTimer = 0;
     this.shockDuration = 75;
+    this.isShockSustained = false;
+    this.isBloomSustained = false;
+    this.bloomSustainInterval = 5;
+    this.bloomSustainCounter = 0;
 
     this.cornerNames = [
       "Sup-Izquierda",
@@ -150,6 +154,27 @@ class GrowthManager {
     }
   }
 
+  setShockSustained(sustained) {
+    const next = Boolean(sustained);
+    if (this.isShockSustained === next) return;
+    this.isShockSustained = Boolean(sustained);
+    if (this.isShockSustained) {
+      this.triggerElectricShock();
+    } else {
+      this.shockTimer = Math.min(this.shockTimer, 15);
+    }
+  }
+
+  setBloomSustained(sustained) {
+    const next = Boolean(sustained);
+    if (this.isBloomSustained === next) return;
+    this.isBloomSustained = Boolean(sustained);
+    if (this.isBloomSustained) {
+      this.triggerBloom();
+      this.bloomSustainCounter = 0;
+    }
+  }
+
   /**
    * Acción Performática [4] — Floración Capilar (Bloom):
    * Obliga a todas las puntas activas a ramificarse simultáneamente en abanico.
@@ -255,7 +280,7 @@ class GrowthManager {
     let cornerText =
       this.lastBatchCount > 1 ? `Simultáneo` : currentCorner;
 
-    if (this.shockTimer > 0) {
+    if (this.shockTimer > 0 || this.isShockSustained) {
       statusBadge = `⚡ SACUDIDA`;
     }
 
@@ -469,6 +494,12 @@ class GrowthManager {
     const needsRecomposite = this.updateFadingTrees();
 
     // 2. Manejo de transición automática cuando el árbol actual termina sus puntas
+    if (
+      this.activeTips.length === 0 &&
+      (this.isBloomSustained || this.isShockSustained)
+    ) {
+      this.triggerNextAutoBatch(false);
+    }
     if (this.activeTips.length === 0) {
       const canContinue =
         this.config.infiniteMode ||
@@ -497,12 +528,30 @@ class GrowthManager {
     this.state = "GROWING";
 
     const shockIntensity =
-      this.shockTimer > 0 ? this.shockTimer / this.shockDuration : 0;
+      this.isShockSustained ? 1.0 : this.shockTimer > 0 ? this.shockTimer / this.shockDuration : 0;
     if (this.shockTimer > 0) {
       this.shockTimer--;
     }
 
     // Preparar los buffers individuales en blendMode(ADD)
+    if (this.isShockSustained) {
+      this.shockTimer = this.shockDuration;
+      for (let i = 0; i < this.activeTips.length; i++) {
+        const tip = this.activeTips[i];
+        if (tip && !tip.isDead && random() < 0.35) {
+          const sign = random() < 0.5 ? -1 : 1;
+          tip.dir.rotate(sign * random(0.15, 0.42));
+        }
+      }
+    }
+
+    if (this.isBloomSustained) {
+      this.bloomSustainCounter++;
+      if (this.bloomSustainCounter >= this.bloomSustainInterval) {
+        this.bloomSustainCounter = 0;
+        this.triggerBloom();
+      }
+    }
     for (let i = 0; i < this.treeRecords.length; i++) {
       const pg = this.treeRecords[i].graphics;
       pg.blendMode(ADD);

@@ -243,6 +243,29 @@ export class MidiMappingEngine {
 			return { mapping, msg, value: nextVal };
 		}
 
+		if (behavior === "sustain") {
+			const isPressed =
+				msg.type === "noteon"
+					? msg.rawValue > 0
+					: msg.type === "noteoff"
+						? false
+						: msg.rawValue >= 64;
+
+			const prevPressed = this._controlStates.get(stateKey) === true;
+			if (isPressed !== prevPressed) {
+				this._controlStates.set(stateKey, isPressed);
+				if (targetMeta.kind === "action") {
+					this.triggerAction(mapping.target, { mapping, msg, isPressed });
+					return { mapping, msg, actionTriggered: mapping.target, isPressed };
+				}
+				if (targetMeta.kind === "boolean") {
+					this.setParamValue(mapping.target, isPressed, { mapping, msg });
+					return { mapping, msg, value: isPressed };
+				}
+			}
+			return null;
+		}
+
 		if (behavior === "momentary") {
 			const isPressed =
 				msg.type === "noteon"

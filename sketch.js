@@ -106,9 +106,19 @@ function setup() {
 		} else if (action === "burst") {
 			appState.growthManager.triggerSimultaneousBurst(data?.count || 2);
 		} else if (action === "bloom") {
-			appState.growthManager.triggerBloom();
+			if (data?.isSustained) {
+				appState.growthManager.setBloomSustained(data.isHeld);
+				if (appState.uiPanel) appState.uiPanel.setPerformativeBtnState(4, data.isHeld);
+			} else {
+				appState.growthManager.triggerBloom();
+			}
 		} else if (action === "shock") {
-			appState.growthManager.triggerElectricShock();
+			if (data?.isSustained) {
+				appState.growthManager.setShockSustained(data.isHeld);
+				if (appState.uiPanel) appState.uiPanel.setPerformativeBtnState(5, data.isHeld);
+			} else {
+				appState.growthManager.triggerElectricShock();
+			}
 		} else if (action === "toggleSimultaneous") {
 			toggleSimultaneousMode(false);
 		}
@@ -196,7 +206,7 @@ function initMidiIntegration() {
 				applyCanvasDimensions(CONFIG.canvasWidth, CONFIG.canvasHeight);
 			}
 		},
-		triggerAction: (actionKey) => {
+		triggerAction: (actionKey, meta) => {
 			switch (actionKey) {
 				case "reset":
 					resetSimulation();
@@ -216,10 +226,10 @@ function initMidiIntegration() {
 					triggerBurstAction(4, 3);
 					break;
 				case "bloom":
-					triggerBloomAction();
+					triggerBloomAction(true, meta?.isPressed ?? true);
 					break;
 				case "shock":
-					triggerElectricShockAction();
+					triggerElectricShockAction(true, meta?.isPressed ?? true);
 					break;
 				case "toggleSimultaneous":
 					toggleSimultaneousMode(true);
@@ -440,23 +450,43 @@ function triggerBurstAction(count, btnNum) {
 	}
 }
 
-function triggerBloomAction() {
-	appState.growthManager.triggerBloom();
-	if (appState.uiPanel) {
-		appState.uiPanel.flashPerformativeBtn(4);
-	}
-	if (appState.tvBridge) {
-		appState.tvBridge.sendAction("bloom");
+function triggerBloomAction(isSustained = false, isHeld = false) {
+	if (isSustained) {
+		appState.growthManager.setBloomSustained(isHeld);
+		if (appState.uiPanel) {
+			appState.uiPanel.setPerformativeBtnState(4, isHeld);
+		}
+		if (appState.tvBridge) {
+			appState.tvBridge.sendAction("bloom", { isSustained: true, isHeld });
+		}
+	} else {
+		appState.growthManager.triggerBloom();
+		if (appState.uiPanel) {
+			appState.uiPanel.flashPerformativeBtn(4);
+		}
+		if (appState.tvBridge) {
+			appState.tvBridge.sendAction("bloom", { isSustained: false });
+		}
 	}
 }
 
-function triggerElectricShockAction() {
-	appState.growthManager.triggerElectricShock();
-	if (appState.uiPanel) {
-		appState.uiPanel.flashPerformativeBtn(5, 900);
-	}
-	if (appState.tvBridge) {
-		appState.tvBridge.sendAction("shock");
+function triggerElectricShockAction(isSustained = false, isHeld = false) {
+	if (isSustained) {
+		appState.growthManager.setShockSustained(isHeld);
+		if (appState.uiPanel) {
+			appState.uiPanel.setPerformativeBtnState(5, isHeld);
+		}
+		if (appState.tvBridge) {
+			appState.tvBridge.sendAction("shock", { isSustained: true, isHeld });
+		}
+	} else {
+		appState.growthManager.triggerElectricShock();
+		if (appState.uiPanel) {
+			appState.uiPanel.flashPerformativeBtn(5, 900);
+		}
+		if (appState.tvBridge) {
+			appState.tvBridge.sendAction("shock", { isSustained: false });
+		}
 	}
 }
 
@@ -485,9 +515,9 @@ function keyPressed() {
 	} else if (key === "3") {
 		triggerBurstAction(4, 3);
 	} else if (key === "4") {
-		triggerBloomAction();
+		triggerBloomAction(true, true);
 	} else if (key === "5") {
-		triggerElectricShockAction();
+		triggerElectricShockAction(true, true);
 	} else if (key === "6") {
 		toggleSimultaneousMode(true);
 	} else if (key === "r" || key === "R") {
@@ -519,9 +549,18 @@ function keyPressed() {
 	}
 }
 
+function keyReleased() {
+	if (key === "4") {
+		triggerBloomAction(true, false);
+	} else if (key === "5") {
+		triggerElectricShockAction(true, false);
+	}
+}
+
 window.CONFIG = CONFIG;
 window.appState = appState;
 window.setup = setup;
 window.draw = draw;
 window.keyPressed = keyPressed;
+window.keyReleased = keyReleased;
 window.windowResized = windowResized;
