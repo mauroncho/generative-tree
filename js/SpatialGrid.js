@@ -187,6 +187,26 @@ class SpatialGrid {
 	 * Resta de la grilla global una fracción (scale) del aporte de un árbol antiguo
 	 * cuando se va desvaneciendo al superar maxVisibleTrees.
 	 */
+	/**
+	 * Ajusta en la grilla global una fracción con signo (deltaScale) del aporte de un árbol.
+	 * Un deltaScale negativo descuenta densidad (al enfriar a gris o desvanecer);
+	 * un deltaScale positivo permite restaurarla en vivo al debugear desde el slider.
+	 */
+	adjustContribution(treeContribution, deltaScale = 0.0) {
+		if (!treeContribution || Math.abs(deltaScale) <= 0.00001) {
+			return;
+		}
+		const cells = this.cells;
+		const len = cells.length;
+		for (let i = 0; i < len; i++) {
+			const contrib = treeContribution[i];
+			if (contrib > 0) {
+				const next = cells[i] + contrib * deltaScale;
+				cells[i] = next > 0 ? next : 0;
+			}
+		}
+	}
+
 	subtractContribution(treeContribution, scale = 1.0) {
 		if (!treeContribution) {
 			return;

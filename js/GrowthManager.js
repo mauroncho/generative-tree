@@ -1,7 +1,8 @@
 /**
  * GrowthManager - Máquina de estados secuencial e infinita para gestionar la cola
  * de orígenes por esquinas, el historial de ramas visibles (maxVisibleTrees) con
- * reciclaje de buffers (pool) y desvanecimiento suave a 60 FPS sin redibujar segmentos.
+ * reciclaje de buffers (pool), enfriamiento/desaturación a gris al finalizar el
+ * crecimiento con alivio del SpatialGrid y desvanecimiento suave a 60 FPS.
  */
 class GrowthManager {
 	constructor(grid, config) {
@@ -23,6 +24,7 @@ class GrowthManager {
 		this.isBloomSustained = false;
 		this.bloomSustainInterval = 5;
 		this.bloomSustainCounter = 0;
+		this._lastMatureBrightness = config.matureBrightness ?? 0.75;
 
 		this.cornerNames = [
 			"Sup-Izquierda",
@@ -48,6 +50,12 @@ class GrowthManager {
 				gridContribution: this.grid.createContributionArray(),
 				opacity: 1.0,
 				fading: false,
+				activeTipCount: 0,
+				hasSpawnedTips: false,
+				cooling: false,
+				coolingProgress: 0.0,
+				desatApplied: 0.0,
+				appliedGridWeight: 1.0,
 			};
 		} else {
 			record.graphics.clear();
@@ -56,6 +64,12 @@ class GrowthManager {
 			record.gridContribution.fill(0);
 			record.opacity = 1.0;
 			record.fading = false;
+			record.activeTipCount = 0;
+			record.hasSpawnedTips = false;
+			record.cooling = false;
+			record.coolingProgress = 0.0;
+			record.desatApplied = 0.0;
+			record.appliedGridWeight = 1.0;
 		}
 		return record;
 	}
@@ -389,6 +403,8 @@ class GrowthManager {
 		const energyDecay = this.computeTrunkDecay();
 
 		const treeRecord = this.acquireTreeRecord();
+		treeRecord.hasSpawnedTips = true;
+		treeRecord.activeTipCount = 1;
 		this.treeRecords.push(treeRecord);
 
 		const trunkTip = new BranchTip(pos, dir, 0, 1.0, {
@@ -426,37 +442,120 @@ class GrowthManager {
 	}
 
 	/**
-	 * Actualiza la opacidad de las ramas antiguas que están saliendo y libera
-	 * su densidad en la SpatialGrid. Devuelve true si hubo cambios de opacidad.
+	 * Desatura incrementalmente los píxeles de una rama finalizada hacia un tono gris
+	 * neutro usando composición 'source-atop' en GPU (preserva el fondo transparente 100%).
+	 */
+	applyTreeDesaturationStep(rec, alphaStep) {
+		if (!rec.graphics || alphaStep <= 0.005) {
+			return;
+		}
+		const ctx = rec.graphics.drawingContext;
+		ctx.save();
+		ctx.globalCompositeOperation = "source-atop";
+		ctx.fillStyle = `rgba(162, 170, 182, ${constrain(alphaStep, 0, 1)})`;
+		ctx.fillRect(0, 0, this.grid.width, this.grid.height);
+		ctx.restore();
+	}
+
+	/**
+	 * Gestiona el ciclo de vida de las capas de árboles:
+	 * 1. Detecta ramas que completaron su crecimiento (activeTipCount === 0) y las enfría a gris.
+	 * 2. Alivia su peso en la SpatialGrid según matureGridRelief para permitir nuevas ramas hijas.
+	 * 3. Actualiza la opacidad de las ramas antiguas que están saliendo (fading).
+	 * Devuelve true si hubo cambios visuales que requieren recomponer mainBuffer.
 	 */
 	updateFadingTrees() {
 		this.enforceMaxVisibleTrees();
 
-		let anyFading = false;
+		for (let i = 0; i < this.treeRecords.length; i++) {
+			this.treeRecords[i].activeTipCount = 0;
+		}
+		for (let i = 0; i < this.activeTips.length; i++) {
+			const tip = this.activeTips[i];
+			if (tip && !tip.isDead && tip.treeRecord) {
+				tip.treeRecord.activeTipCount++;
+				tip.treeRecord.hasSpawnedTips = true;
+			}
+		}
+
+		let needsRecomposite = false;
 		const fadeStep = 0.032;
+		const coolStep = 0.04;
+		const targetDesatConfig = constrain(
+			this.config.matureDesaturation ?? 0.75,
+			0.0,
+			1.0,
+		);
+		const targetReliefConfig = constrain(
+			this.config.matureGridRelief ?? 0.7,
+			0.0,
+			0.95,
+		);
+		const targetBrightConfig = constrain(
+			this.config.matureBrightness ?? 0.75,
+			0.25,
+			1.0,
+		);
+
+		if (Math.abs(this._lastMatureBrightness - targetBrightConfig) > 0.001) {
+			this._lastMatureBrightness = targetBrightConfig;
+			needsRecomposite = true;
+		}
 
 		for (let i = this.treeRecords.length - 1; i >= 0; i--) {
 			const rec = this.treeRecords[i];
-			if (!rec.fading) {
-				continue;
+
+			if (rec.hasSpawnedTips && rec.activeTipCount === 0) {
+				rec.cooling = true;
 			}
 
-			anyFading = true;
-			const prevOpacity = rec.opacity;
-			rec.opacity = Math.max(0, rec.opacity - fadeStep);
-			const delta = prevOpacity - rec.opacity;
-
-			if (delta > 0) {
-				this.grid.subtractContribution(rec.gridContribution, delta);
+			if (rec.cooling && rec.coolingProgress < 1.0) {
+				rec.coolingProgress = Math.min(1.0, rec.coolingProgress + coolStep);
+				needsRecomposite = true;
 			}
 
-			if (rec.opacity <= 0.001) {
+			if (rec.cooling) {
+				const desiredDesat = rec.coolingProgress * targetDesatConfig;
+				if (desiredDesat > rec.desatApplied + 0.005) {
+					const denom = Math.max(0.02, 1.0 - rec.desatApplied);
+					const alphaStep = (desiredDesat - rec.desatApplied) / denom;
+					if (alphaStep >= 0.16 || rec.coolingProgress >= 1.0) {
+						this.applyTreeDesaturationStep(rec, alphaStep);
+						rec.desatApplied = desiredDesat;
+						needsRecomposite = true;
+					}
+				}
+			}
+
+			if (rec.fading) {
+				needsRecomposite = true;
+				rec.opacity = Math.max(0, rec.opacity - fadeStep);
+			}
+
+			if (rec.cooling || rec.fading) {
+				const targetGridWeight =
+					rec.opacity * (1.0 - rec.coolingProgress * targetReliefConfig);
+				const weightDelta = targetGridWeight - rec.appliedGridWeight;
+				if (Math.abs(weightDelta) > 0.0005) {
+					this.grid.adjustContribution(rec.gridContribution, weightDelta);
+					rec.appliedGridWeight = targetGridWeight;
+				}
+			}
+
+			if (rec.fading && rec.opacity <= 0.001) {
+				if (rec.appliedGridWeight > 0.00001) {
+					this.grid.adjustContribution(
+						rec.gridContribution,
+						-rec.appliedGridWeight,
+					);
+					rec.appliedGridWeight = 0;
+				}
 				this.treeRecords.splice(i, 1);
 				this.layerPool.push(rec);
 			}
 		}
 
-		return anyFading;
+		return needsRecomposite;
 	}
 
 	/**
@@ -469,13 +568,19 @@ class GrowthManager {
 		mainBuffer.background(this.config.bgColor);
 		mainBuffer.blendMode(ADD);
 
+		const targetBright = constrain(
+			this.config.matureBrightness ?? 0.75,
+			0.25,
+			1.0,
+		);
 		const ctx = mainBuffer.drawingContext;
 		for (let i = 0; i < this.treeRecords.length; i++) {
 			const rec = this.treeRecords[i];
 			if (rec.opacity <= 0.001) {
 				continue;
 			}
-			ctx.globalAlpha = rec.opacity;
+			const matureDim = 1.0 - rec.coolingProgress * (1.0 - targetBright);
+			ctx.globalAlpha = rec.opacity * matureDim;
 			mainBuffer.image(rec.graphics, 0, 0);
 		}
 
@@ -488,7 +593,7 @@ class GrowthManager {
 	 * límite de ramas visibles y actualiza los buffers acumulativos.
 	 */
 	stepAndRender(mainBuffer) {
-		// 1. Procesar desvanecimiento de ramas antiguas si superan maxVisibleTrees
+		// 1. Procesar enfriamiento a gris y desvanecimiento de ramas antiguas
 		const needsRecomposite = this.updateFadingTrees();
 
 		// 2. Manejo de transición automática cuando el árbol actual termina sus puntas
@@ -571,7 +676,7 @@ class GrowthManager {
 					tip.render(tip.treeRecord.graphics, this.config);
 				}
 
-				// Si no estamos recomponiendo por fade-out, estampar directo también en mainBuffer
+				// Si no estamos recomponiendo por enfriamiento/fade-out, estampar directo también en mainBuffer
 				if (!needsRecomposite) {
 					tip.render(mainBuffer, this.config);
 				}
@@ -584,9 +689,13 @@ class GrowthManager {
 					continue;
 				}
 
+				const isPriorityBranch =
+					this.config.forceMainBranching && tip.generation <= 1;
+				const effectiveCap = isPriorityBranch
+					? this.config.maxActiveTips + 250
+					: this.config.maxActiveTips;
 				const remainingCapacity =
-					this.config.maxActiveTips -
-					(this.activeTips.length + spawnedThisStep.length);
+					effectiveCap - (this.activeTips.length + spawnedThisStep.length);
 
 				if (remainingCapacity > 0) {
 					const newChildren = tip.tryBranch(this.grid, this.config);
@@ -607,7 +716,7 @@ class GrowthManager {
 
 		mainBuffer.pop();
 
-		// Si alguna rama antigua se está desvaneciendo, recomponer las capas sobre mainBuffer
+		// Si alguna rama se está enfriando a gris o desvaneciendo, recomponer las capas sobre mainBuffer
 		if (needsRecomposite) {
 			this.recompositeMainBuffer(mainBuffer);
 		}

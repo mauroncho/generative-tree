@@ -164,7 +164,14 @@ class BranchTip {
 		const freeOverlapDensity =
 			config.saturationThreshold * config.overlapTolerance;
 		const isInLaunchShield = this.generation === 0 && this.ageSteps < 24;
-		const isInSpawnGrace = this.generation >= 1 && this.ageSteps <= 8;
+		const baseGrace = config.spawnGraceSteps ?? 22;
+		const graceLimit =
+			this.generation === 1
+				? baseGrace
+				: this.generation === 2
+					? Math.round(baseGrace * 0.75)
+					: Math.max(6, Math.round(baseGrace * 0.45));
+		const isInSpawnGrace = this.generation >= 1 && this.ageSteps <= graceLimit;
 
 		if (!isInLaunchShield && !isInSpawnGrace) {
 			const repulsionRadius = this.generation <= 1 ? 3 : 2;
@@ -233,7 +240,11 @@ class BranchTip {
 					this.isDead = true;
 					return;
 				}
-			} else if (this.generation === 2 && localDensity > satLimit * 1.2) {
+			} else if (
+				this.generation === 2 &&
+				!config.forceMainBranching &&
+				localDensity > satLimit * 1.2
+			) {
 				this.energy -= this.energyDecay * 1.8;
 			}
 		}
@@ -291,10 +302,15 @@ class BranchTip {
 		}
 
 		const localDensity = grid.getDensity(this.pos.x, this.pos.y);
+		const forceMain = Boolean(config.forceMainBranching);
+		const isExemptMain = forceMain && this.generation <= 1;
+		const densityLimitMult = forceMain && this.generation === 2 ? 1.85 : 1.0;
 		const maxBranchDensity =
-			config.saturationThreshold * (0.85 + config.overlapTolerance * 0.55);
+			config.saturationThreshold *
+			(0.85 + config.overlapTolerance * 0.55) *
+			densityLimitMult;
 
-		if (localDensity > maxBranchDensity) {
+		if (!isExemptMain && localDensity > maxBranchDensity) {
 			return EMPTY_CHILDREN;
 		}
 
@@ -312,7 +328,12 @@ class BranchTip {
 			const crowding =
 				(localDensity - freeOverlap) /
 				Math.max(1.0, maxBranchDensity - freeOverlap);
-			prob *= constrain(1.0 - crowding * 0.7, 0.25, 1.0);
+			prob *=
+				forceMain && this.generation === 0
+					? 1.0
+					: forceMain && this.generation === 1
+						? constrain(1.0 - crowding * 0.25, 0.75, 1.0)
+						: constrain(1.0 - crowding * 0.7, 0.25, 1.0);
 		}
 
 		if (random() >= prob) {
@@ -395,7 +416,7 @@ class BranchTip {
 		if (
 			this.generation === 0 &&
 			config.maxGeneration >= 2 &&
-			random() < 0.22
+			random() < (config.forceMainBranching ? 0.08 : 0.22)
 		) {
 			childGen = 2;
 		}
