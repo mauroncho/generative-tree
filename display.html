@@ -18,11 +18,11 @@
       display: flex;
       justify-content: center;
       align-items: center;
-      cursor: none; /* Oculta el puntero en la pantalla de proyección */
+      cursor: none;
       user-select: none;
     }
     body:hover {
-      cursor: default; /* Solo si se mueve */
+      cursor: default;
     }
     canvas {
       display: block;
@@ -54,6 +54,7 @@
 </head>
 <body>
   <div id="tv-hint" class="tv-hint">📺 PANTALLA TV // [F] Pantalla Completa | Doble Click</div>
+  <script src="js/config.js"></script>
   <script src="js/SpatialGrid.js"></script>
   <script src="js/BranchTip.js"></script>
   <script src="js/GrowthManager.js"></script>

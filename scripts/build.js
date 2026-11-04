@@ -67,9 +67,10 @@ for (const file of htmlAndCssFiles) {
 	}
 }
 
-// 5. Verificar que WebMidi.js y p5.js existan localmente en dist/
+// 5. Verificar que WebMidi.js, config.js y p5.js existan localmente en dist/
 const requiredLocalAssets = [
 	path.join(distDir, "js", "p5.min.js"),
+	path.join(distDir, "js", "config.js"),
 	path.join(distDir, "js", "vendor", "webmidi.esm.js"),
 	path.join(distDir, "js", "midi", "midiManager.js"),
 	path.join(distDir, "js", "midi", "midiMapping.js"),

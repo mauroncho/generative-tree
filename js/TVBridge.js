@@ -3,12 +3,17 @@
  * y la Pantalla de Visualización (Tele de tubo / Proyección).
  *
  * Utiliza BroadcastChannel de forma nativa para latencia cero (0 ms)
- * y fallback con postMessage para compatibilidad total (incluso en file://).
+ * y fallback con postMessage para compatibilidad total (incluso en file://),
+ * con deduplicación estricta de mensajes por ID.
  */
 class TVBridge {
 	constructor(isDisplayMode = false) {
 		this.isDisplay = isDisplayMode;
 		this.channelName = "lichtenberg_channel";
+		this.instanceId = `${isDisplayMode ? "tv" : "pc"}_${Math.random().toString(36).slice(2, 9)}`;
+		this.msgSeq = 0;
+		this.lastProcessedMsgId = null;
+
 		this.channel = null;
 		this.tvWindow = null;
 
@@ -56,7 +61,6 @@ class TVBridge {
 			return this.tvWindow;
 		}
 
-		// Abrir ventana sin barras de herramientas para una vista limpia (aspecto 4:3 clásico o adaptable)
 		const width = 1024;
 		const height = 768;
 		const left = window.screen.width ? (window.screen.width - width) / 2 : 50;
@@ -86,34 +90,47 @@ class TVBridge {
 	}
 
 	/**
-	 * Envía un mensaje tanto por BroadcastChannel como por postMessage hacia la ventana hija o padre.
+	 * Envía un mensaje con ID único para evitar ejecución duplicada cuando
+	 * tanto BroadcastChannel como window.postMessage están activos.
 	 */
 	post(data) {
-		const payload = { ...data, channel: this.channelName };
+		const payload = {
+			...data,
+			channel: this.channelName,
+			_senderId: this.instanceId,
+			_msgId: `${this.instanceId}_${++this.msgSeq}`,
+		};
 
+		let sentViaChannel = false;
 		if (this.channel) {
 			try {
 				this.channel.postMessage(payload);
+				sentViaChannel = true;
 			} catch (_) {}
 		}
 
-		// Enviar por postMessage a la ventana abierta si somos el controlador
-		if (this.tvWindow && !this.tvWindow.closed) {
-			try {
-				this.tvWindow.postMessage(payload, "*");
-			} catch (_) {}
-		}
-
-		// Enviar por postMessage a la ventana opener si somos el display
-		if (window.opener && !window.opener.closed) {
-			try {
-				window.opener.postMessage(payload, "*");
-			} catch (_) {}
+		// Usar postMessage como fallback si BroadcastChannel no está disponible
+		if (!sentViaChannel) {
+			if (this.tvWindow && !this.tvWindow.closed) {
+				try {
+					this.tvWindow.postMessage(payload, "*");
+				} catch (_) {}
+			}
+			if (window.opener && !window.opener.closed) {
+				try {
+					window.opener.postMessage(payload, "*");
+				} catch (_) {}
+			}
 		}
 	}
 
 	handleMessage(msg) {
 		if (!msg || typeof msg !== "object") return;
+		if (msg._senderId && msg._senderId === this.instanceId) return;
+		if (msg._msgId && msg._msgId === this.lastProcessedMsgId) return;
+		if (msg._msgId) {
+			this.lastProcessedMsgId = msg._msgId;
+		}
 
 		switch (msg.type) {
 			case "PING":
@@ -169,7 +186,6 @@ class TVBridge {
 		this.heartbeatTimer = setInterval(() => {
 			this.post({ type: "PING" });
 
-			// Si hace más de 3 segundos no hay respuesta y no hay ventana abierta, marcar desconectado
 			if (Date.now() - this.lastHeartbeat > 3000) {
 				if (!this.isTVOpen() && this.isConnected) {
 					this.notifyConnection(false);
@@ -187,7 +203,6 @@ class TVBridge {
 		}
 	}
 
-	// Métodos públicos para la Base de Control
 	sendParam(key, value) {
 		this.post({ type: "PARAM_CHANGE", key, value });
 	}
@@ -204,7 +219,6 @@ class TVBridge {
 		this.post({ type: "REQUEST_CONFIG" });
 	}
 
-	// Registros de callbacks
 	onParam(callback) {
 		this.paramListeners.push(callback);
 	}

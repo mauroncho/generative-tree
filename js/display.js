@@ -4,43 +4,7 @@
  * sincronizado en tiempo real con la Base de Control en la PC mediante TVBridge.
  */
 
-const TV_CONFIG = {
-	canvasWidth: 800,
-	canvasHeight: 600,
-	tvFullScreen: false,
-	bgColor: "#050608",
-	frameMargin: 36,
-	frameStrokeColor: [55, 78, 115, 150],
-	gridCellSize: 12,
-	saturationThreshold: 8.5,
-	overlapTolerance: 0.6,
-	originSpread: 140,
-	stepsPerFrame: 5,
-	stepLength: 2.2,
-	maxVisibleTrees: 12,
-	infiniteMode: true,
-	autoSequence: true,
-	simultaneousMode: false,
-	simultaneousRandom: true,
-	simultaneousCount: 1,
-	maxActiveTips: 1400,
-	trunkCenterPull: 0.095,
-	trunkBaseLength: 680,
-	trunkLengthRandomness: 0.65,
-	trunkMinLength: 350,
-	trunkMaxLength: 1100,
-	trunkBranchRate: 0.33,
-	subBranchIntensity: 2.0,
-	subBranchRate: 3.0,
-	subBranchLength: 2.0,
-	subBranchForkChance: 0.5,
-	maxGeneration: 6,
-	branchProb: [0.08, 0.11, 0.13, 0.145, 0.155, 0.16],
-	angleVariance: 0.5,
-	noiseScale: 0.018,
-	repulsionStrength: 0.24,
-	showDebugGrid: false,
-};
+const TV_CONFIG = window.createConfig();
 
 const displayState = {
 	bridge: null,
@@ -49,6 +13,7 @@ const displayState = {
 	growthManager: null,
 	seed: 0,
 	telemetryCounter: 0,
+	resizeDebounceTimer: null,
 };
 
 function setup() {
@@ -82,45 +47,15 @@ function setup() {
 
 	displayState.bridge.onParam((key, value) => {
 		TV_CONFIG[key] = value;
-		if (
-			key === "canvasWidth" ||
-			key === "canvasHeight" ||
-			key === "tvFullScreen"
-		) {
+		if (key === "tvFullScreen") {
 			updateDimensions();
+		} else if (key === "canvasWidth" || key === "canvasHeight") {
+			scheduleDimensionsUpdate();
 		}
 	});
 
 	displayState.bridge.onAction((action, data) => {
-		if (action === "reset") {
-			resetSimulation();
-		} else if (action === "nextCorner") {
-			displayState.growthManager.triggerNextCorner();
-		} else if (action === "burst") {
-			displayState.growthManager.triggerSimultaneousBurst(data?.count || 2);
-		} else if (action === "bloom") {
-			if (data?.isSustained) {
-				displayState.growthManager.setBloomSustained(data.isHeld);
-			} else {
-				displayState.growthManager.triggerBloom();
-			}
-		} else if (action === "shock") {
-			if (data?.isSustained) {
-				displayState.growthManager.setShockSustained(data.isHeld);
-			} else {
-				displayState.growthManager.triggerElectricShock();
-			}
-		} else if (action === "save") {
-			saveHighResPNG();
-		} else if (action === "toggleFullScreen") {
-			toggleTVFullScreen();
-		} else if (action === "syncAll" && data && data.config) {
-			Object.assign(TV_CONFIG, data.config);
-			if (data.seed) {
-				displayState.seed = data.seed;
-			}
-			updateDimensions();
-		}
+		dispatchTVAction(action, data, false);
 	});
 
 	// Solicitar configuración inicial a la PC
@@ -150,6 +85,81 @@ function setup() {
 	});
 }
 
+function dispatchTVAction(action, data = null, notifyPC = true) {
+	switch (action) {
+		case "reset":
+			resetSimulation(data?.seed);
+			if (notifyPC && displayState.bridge) {
+				displayState.bridge.sendAction("reset", { seed: displayState.seed });
+			}
+			break;
+		case "nextCorner":
+			displayState.growthManager.triggerNextCorner();
+			if (notifyPC && displayState.bridge) {
+				displayState.bridge.sendAction("nextCorner");
+			}
+			break;
+		case "burst": {
+			const count = data?.count || 2;
+			displayState.growthManager.triggerSimultaneousBurst(count);
+			if (notifyPC && displayState.bridge) {
+				displayState.bridge.sendAction("burst", { count });
+			}
+			break;
+		}
+		case "burst2":
+			dispatchTVAction("burst", { count: 2 }, notifyPC);
+			break;
+		case "burst3":
+			dispatchTVAction("burst", { count: 3 }, notifyPC);
+			break;
+		case "burst4":
+			dispatchTVAction("burst", { count: 4 }, notifyPC);
+			break;
+		case "bloom":
+			if (data?.isSustained) {
+				displayState.growthManager.setBloomSustained(data.isHeld);
+			} else {
+				displayState.growthManager.triggerBloom();
+			}
+			if (notifyPC && displayState.bridge) {
+				displayState.bridge.sendAction("bloom", data);
+			}
+			break;
+		case "shock":
+			if (data?.isSustained) {
+				displayState.growthManager.setShockSustained(data.isHeld);
+			} else {
+				displayState.growthManager.triggerElectricShock();
+			}
+			if (notifyPC && displayState.bridge) {
+				displayState.bridge.sendAction("shock", data);
+			}
+			break;
+		case "toggleSimultaneous":
+			TV_CONFIG.simultaneousMode = !TV_CONFIG.simultaneousMode;
+			if (TV_CONFIG.simultaneousMode) {
+				displayState.growthManager.triggerSimultaneousBurst(2);
+			}
+			if (notifyPC && displayState.bridge) {
+				displayState.bridge.sendAction("toggleSimultaneous");
+			}
+			break;
+		case "save":
+			saveHighResPNG();
+			break;
+		case "toggleFullScreen":
+			toggleTVFullScreen();
+			break;
+		case "syncAll":
+			if (data && data.config) {
+				Object.assign(TV_CONFIG, data.config);
+				updateDimensions(data.seed);
+			}
+			break;
+	}
+}
+
 function toggleTVFullScreen() {
 	if (!document.fullscreenElement) {
 		document.documentElement.requestFullscreen().catch(() => {});
@@ -158,11 +168,26 @@ function toggleTVFullScreen() {
 	}
 }
 
+function scheduleDimensionsUpdate() {
+	if (displayState.resizeDebounceTimer) {
+		clearTimeout(displayState.resizeDebounceTimer);
+	}
+	displayState.resizeDebounceTimer = setTimeout(() => {
+		displayState.resizeDebounceTimer = null;
+		updateDimensions();
+	}, 90);
+}
+
 /**
  * Redimensiona el lienzo CRT, su buffer y grilla de ocupación,
  * preservando siempre el marco interno delimitador.
  */
-function applyCanvasDimensions(targetW, targetH) {
+function applyCanvasDimensions(targetW, targetH, forcedSeed = null) {
+	if (displayState.resizeDebounceTimer) {
+		clearTimeout(displayState.resizeDebounceTimer);
+		displayState.resizeDebounceTimer = null;
+	}
+
 	const newW = Math.max(300, Math.floor(targetW));
 	const newH = Math.max(240, Math.floor(targetH));
 
@@ -172,6 +197,9 @@ function applyCanvasDimensions(targetW, targetH) {
 		displayState.treeBuffer &&
 		displayState.grid
 	) {
+		if (forcedSeed) {
+			resetSimulation(forcedSeed);
+		}
 		return;
 	}
 
@@ -195,17 +223,17 @@ function applyCanvasDimensions(targetW, targetH) {
 		displayState.growthManager.handleResize(displayState.grid);
 	}
 
-	resetSimulation();
+	resetSimulation(forcedSeed);
 }
 
-function updateDimensions() {
+function updateDimensions(forcedSeed = null) {
 	const targetW = TV_CONFIG.tvFullScreen
 		? windowWidth
 		: TV_CONFIG.canvasWidth || 800;
 	const targetH = TV_CONFIG.tvFullScreen
 		? windowHeight
 		: TV_CONFIG.canvasHeight || 600;
-	applyCanvasDimensions(targetW, targetH);
+	applyCanvasDimensions(targetW, targetH, forcedSeed);
 }
 
 function windowResized() {
@@ -214,8 +242,11 @@ function windowResized() {
 	}
 }
 
-function resetSimulation() {
-	displayState.seed = Math.floor(Math.random() * 900000) + 100000;
+function resetSimulation(forcedSeed = null) {
+	displayState.seed =
+		typeof forcedSeed === "number" && forcedSeed > 0
+			? forcedSeed
+			: Math.floor(Math.random() * 900000) + 100000;
 	randomSeed(displayState.seed);
 	noiseSeed(displayState.seed);
 
@@ -238,16 +269,11 @@ function saveHighResPNG() {
 }
 
 function drawInnerFrame(target) {
-	const { left, top, right, bottom } = displayState.grid.bounds;
-	const [r, g, b, a] = TV_CONFIG.frameStrokeColor;
-
-	target.push();
-	target.blendMode(BLEND);
-	target.noFill();
-	target.stroke(r, g, b, a);
-	target.strokeWeight(1);
-	target.rect(left, top, right - left, bottom - top);
-	target.pop();
+	window.drawInnerFrameShared(
+		target,
+		displayState.grid.bounds,
+		TV_CONFIG.frameStrokeColor,
+	);
 }
 
 function draw() {
@@ -274,54 +300,16 @@ function draw() {
 }
 
 function keyPressed() {
-	if (key === "1") {
-		displayState.growthManager.triggerSimultaneousBurst(2);
-		if (displayState.bridge)
-			displayState.bridge.sendAction("burst", { count: 2 });
-	} else if (key === "2") {
-		displayState.growthManager.triggerSimultaneousBurst(3);
-		if (displayState.bridge)
-			displayState.bridge.sendAction("burst", { count: 3 });
-	} else if (key === "3") {
-		displayState.growthManager.triggerSimultaneousBurst(4);
-		if (displayState.bridge)
-			displayState.bridge.sendAction("burst", { count: 4 });
-	} else if (key === "4") {
-		displayState.growthManager.setBloomSustained(true);
-		if (displayState.bridge) displayState.bridge.sendAction("bloom", { isSustained: true, isHeld: true });
-	} else if (key === "5") {
-		displayState.growthManager.setShockSustained(true);
-		if (displayState.bridge) displayState.bridge.sendAction("shock", { isSustained: true, isHeld: true });
-	} else if (key === "6") {
-		TV_CONFIG.simultaneousMode = !TV_CONFIG.simultaneousMode;
-		if (TV_CONFIG.simultaneousMode) {
-			displayState.growthManager.triggerSimultaneousBurst(2);
-		}
-		if (displayState.bridge) {
-			displayState.bridge.sendAction("toggleSimultaneous");
-		}
-	} else if (key === "f" || key === "F") {
-		toggleTVFullScreen();
-	} else if (key === "r" || key === "R") {
-		resetSimulation();
-		if (displayState.bridge) displayState.bridge.sendAction("reset");
-	} else if (key === "s" || key === "S") {
-		saveHighResPNG();
-	} else if (key === " ") {
-		displayState.growthManager.triggerNextCorner();
-		if (displayState.bridge) displayState.bridge.sendAction("nextCorner");
-		return false;
-	}
+	return window.handleSharedKeyPressed(key, {
+		onAction: (act, payload) => dispatchTVAction(act, payload, true),
+		onToggleFullScreen: () => toggleTVFullScreen(),
+	});
 }
 
 function keyReleased() {
-	if (key === "4") {
-		displayState.growthManager.setBloomSustained(false);
-		if (displayState.bridge) displayState.bridge.sendAction("bloom", { isSustained: true, isHeld: false });
-	} else if (key === "5") {
-		displayState.growthManager.setShockSustained(false);
-		if (displayState.bridge) displayState.bridge.sendAction("shock", { isSustained: true, isHeld: false });
-	}
+	window.handleSharedKeyReleased(key, {
+		onAction: (act, payload) => dispatchTVAction(act, payload, true),
+	});
 }
 
 window.setup = setup;
