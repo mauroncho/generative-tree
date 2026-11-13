@@ -5,7 +5,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { syncVendor } from "./sync-vendor.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
@@ -25,33 +24,22 @@ function copyRecursive(src, dest) {
 	}
 }
 
-// 1. Asegurar sincronización de WebMidi.js desde node_modules hacia js/vendor
-syncVendor();
-
-// 2. Limpiar y recrear directorio dist/
+// 1. Limpiar y recrear directorio dist/
 if (fs.existsSync(distDir)) {
 	fs.rmSync(distDir, { recursive: true, force: true });
 }
 fs.mkdirSync(distDir, { recursive: true });
 
-// 3. Copiar archivos estáticos y módulos locales necesarios para la ejecución offline
-const entriesToCopy = [
-	"index.html",
-	"display.html",
-	"sketch.js",
-	"css",
-	"js",
-	"assets",
-];
+// 2. Copiar archivos estáticos y módulos locales necesarios para la ejecución offline
+const entriesToCopy = ["index.html", "sketch.js", "css", "js"];
 
 for (const entry of entriesToCopy) {
 	copyRecursive(path.join(rootDir, entry), path.join(distDir, entry));
 }
 
-// 4. Auditar HTML y CSS para verificar ausencia total de CDNs o imports remotos
+// 3. Auditar HTML y CSS para verificar ausencia total de CDNs o imports remotos
 const htmlAndCssFiles = [
 	path.join(distDir, "index.html"),
-	path.join(distDir, "display.html"),
 	path.join(distDir, "css", "style.css"),
 ];
 
@@ -67,15 +55,14 @@ for (const file of htmlAndCssFiles) {
 	}
 }
 
-// 5. Verificar que WebMidi.js, config.js y p5.js existan localmente en dist/
+// 4. Verificar que todos los módulos locales requeridos existan en dist/
 const requiredLocalAssets = [
 	path.join(distDir, "js", "p5.min.js"),
 	path.join(distDir, "js", "config.js"),
-	path.join(distDir, "js", "vendor", "webmidi.esm.js"),
-	path.join(distDir, "js", "midi", "midiManager.js"),
-	path.join(distDir, "js", "midi", "midiMapping.js"),
-	path.join(distDir, "js", "midi", "midiConfig.js"),
-	path.join(distDir, "js", "midi", "midiDebug.js"),
+	path.join(distDir, "js", "SpatialGrid.js"),
+	path.join(distDir, "js", "BranchTip.js"),
+	path.join(distDir, "js", "GrowthManager.js"),
+	path.join(distDir, "js", "UIPanel.js"),
 ];
 
 for (const reqFile of requiredLocalAssets) {

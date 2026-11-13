@@ -40,13 +40,14 @@ class GrowthManager {
 
 	/**
 	 * Obtiene un registro de capa del pool o crea uno nuevo si el pool está vacío.
+	 * Las capas internas usan pixelDensity(1) para reducir en un 75% el consumo de VRAM
+	 * y el costo de fill-rate durante la recomposición aditiva en pantallas HiDPI/FullScreen.
 	 */
 	acquireTreeRecord() {
 		let record = this.layerPool.pop();
 		if (!record) {
 			const pg = createGraphics(this.grid.width, this.grid.height);
-			const density = Math.min(window.devicePixelRatio || 1, 2);
-			pg.pixelDensity(density);
+			pg.pixelDensity(1);
 			pg.blendMode(ADD);
 			pg.strokeCap(ROUND);
 			record = {
@@ -60,12 +61,37 @@ class GrowthManager {
 				coolingProgress: 0.0,
 				desatApplied: 0.0,
 				appliedGridWeight: 1.0,
+				minX: Number.POSITIVE_INFINITY,
+				minY: Number.POSITIVE_INFINITY,
+				maxX: Number.NEGATIVE_INFINITY,
+				maxY: Number.NEGATIVE_INFINITY,
 			};
 		} else {
-			record.graphics.clear();
+			// Limpiar únicamente el bounding box usado por la rama anterior en lugar de todo el lienzo
+			const ctx = record.graphics.drawingContext;
+			ctx.save();
+			ctx.globalCompositeOperation = "source-over";
+			if (record.maxX >= record.minX && record.maxY >= record.minY) {
+				const pad = 20;
+				const bx = Math.max(0, Math.floor(record.minX - pad));
+				const by = Math.max(0, Math.floor(record.minY - pad));
+				const bw = Math.min(
+					this.grid.width - bx,
+					Math.ceil(record.maxX - record.minX + pad * 2),
+				);
+				const bh = Math.min(
+					this.grid.height - by,
+					Math.ceil(record.maxY - record.minY + pad * 2),
+				);
+				ctx.clearRect(bx, by, bw, bh);
+			} else {
+				ctx.clearRect(0, 0, this.grid.width, this.grid.height);
+			}
+			ctx.restore();
+
 			record.graphics.blendMode(ADD);
 			record.graphics.strokeCap(ROUND);
-			record.gridContribution.fill(0);
+			this.grid.resetContribution(record.gridContribution);
 			record.opacity = 1.0;
 			record.fading = false;
 			record.activeTipCount = 0;
@@ -74,6 +100,10 @@ class GrowthManager {
 			record.coolingProgress = 0.0;
 			record.desatApplied = 0.0;
 			record.appliedGridWeight = 1.0;
+			record.minX = Number.POSITIVE_INFINITY;
+			record.minY = Number.POSITIVE_INFINITY;
+			record.maxX = Number.NEGATIVE_INFINITY;
+			record.maxY = Number.NEGATIVE_INFINITY;
 		}
 		return record;
 	}
@@ -307,23 +337,6 @@ class GrowthManager {
 	}
 
 	/**
-	 * Devuelve una descripción legible del estado actual para la UI.
-	 */
-	getStatusLabel() {
-		const cornerName = this.cornerNames[this.currentCornerIndex % 4];
-		const visibleCount = this.treeRecords.length;
-		const maxVis = this.config.maxVisibleTrees;
-
-		if (this.state === "COMPLETED" && this.activeTips.length === 0) {
-			return `Pausado (${visibleCount}/${maxVis} visibles)`;
-		}
-		if (this.state === "TRANSITION") {
-			return `Siguiente esquina (#${this.treesSpawnedCount + 1})...`;
-		}
-		return `Rama #${this.treesSpawnedCount} (${cornerName}) | Visibles: ${visibleCount}/${maxVis}`;
-	}
-
-	/**
 	 * Devuelve un objeto estructurado con la telemetría para desacoplar el layout de la UI
 	 * y evitar saltos visuales o reescalados por cambios de longitud de texto.
 	 */
@@ -492,17 +505,34 @@ class GrowthManager {
 
 	/**
 	 * Desatura incrementalmente los píxeles de una rama finalizada hacia un tono gris
-	 * neutro usando composición 'source-atop' en GPU (preserva el fondo transparente 100%).
+	 * neutro usando composición 'source-atop' en GPU, acotando el fillRect al bounding box del árbol.
 	 */
 	applyTreeDesaturationStep(rec, alphaStep) {
 		if (!rec.graphics || alphaStep <= 0.005) {
 			return;
 		}
 		const ctx = rec.graphics.drawingContext;
+		const pad = 18;
+		const hasBounds = rec.maxX >= rec.minX && rec.maxY >= rec.minY;
+		const bx = hasBounds ? Math.max(0, Math.floor(rec.minX - pad)) : 0;
+		const by = hasBounds ? Math.max(0, Math.floor(rec.minY - pad)) : 0;
+		const bw = hasBounds
+			? Math.min(
+					this.grid.width - bx,
+					Math.ceil(rec.maxX - rec.minX + pad * 2),
+				)
+			: this.grid.width;
+		const bh = hasBounds
+			? Math.min(
+					this.grid.height - by,
+					Math.ceil(rec.maxY - rec.minY + pad * 2),
+				)
+			: this.grid.height;
+
 		ctx.save();
 		ctx.globalCompositeOperation = "source-atop";
 		ctx.fillStyle = `rgba(162, 170, 182, ${constrain(alphaStep, 0, 1)})`;
-		ctx.fillRect(0, 0, this.grid.width, this.grid.height);
+		ctx.fillRect(bx, by, bw, bh);
 		ctx.restore();
 	}
 
@@ -585,7 +615,11 @@ class GrowthManager {
 				const targetGridWeight =
 					rec.opacity * (1.0 - rec.coolingProgress * targetReliefConfig);
 				const weightDelta = targetGridWeight - rec.appliedGridWeight;
-				if (Math.abs(weightDelta) > 0.0005) {
+				if (
+					Math.abs(weightDelta) >= 0.035 ||
+					rec.coolingProgress >= 1.0 ||
+					rec.opacity <= 0.001
+				) {
 					this.grid.adjustContribution(rec.gridContribution, weightDelta);
 					rec.appliedGridWeight = targetGridWeight;
 				}
@@ -608,21 +642,28 @@ class GrowthManager {
 	}
 
 	/**
-	 * Recompone el buffer principal en O(1) usando las texturas congeladas de las
-	 * ramas visibles (con alpha nativo de GPU en drawingContext, sin redibujar segmentos).
+	 * Recompone el buffer principal en O(1) usando drawImage nativo del CanvasRenderingContext2D
+	 * sobre las texturas congeladas de las ramas visibles (sin pasar por el overhead de p5.image()).
 	 */
 	recompositeMainBuffer(mainBuffer) {
-		mainBuffer.push();
-		mainBuffer.blendMode(BLEND);
-		mainBuffer.background(this.config.bgColor);
-		mainBuffer.blendMode(ADD);
+		const ctx = mainBuffer.drawingContext;
+		const w = this.grid.width;
+		const h = this.grid.height;
+
+		ctx.save();
+		ctx.globalCompositeOperation = "source-over";
+		ctx.globalAlpha = 1.0;
+		ctx.fillStyle = this.config.bgColor;
+		ctx.fillRect(0, 0, w, h);
+
+		ctx.globalCompositeOperation = "lighter";
 
 		const targetBright = constrain(
 			this.config.matureBrightness ?? 0.75,
 			0.25,
 			1.0,
 		);
-		const ctx = mainBuffer.drawingContext;
+
 		for (let i = 0; i < this.treeRecords.length; i++) {
 			const rec = this.treeRecords[i];
 			if (rec.opacity <= 0.001) {
@@ -630,11 +671,10 @@ class GrowthManager {
 			}
 			const matureDim = 1.0 - rec.coolingProgress * (1.0 - targetBright);
 			ctx.globalAlpha = rec.opacity * matureDim;
-			mainBuffer.image(rec.graphics, 0, 0);
+			ctx.drawImage(rec.graphics.elt, 0, 0, w, h);
 		}
 
-		ctx.globalAlpha = 1.0;
-		mainBuffer.pop();
+		ctx.restore();
 	}
 
 	/**
@@ -707,9 +747,9 @@ class GrowthManager {
 			}
 		}
 
-		mainBuffer.push();
-		mainBuffer.blendMode(ADD);
-		mainBuffer.strokeCap(ROUND);
+		const mainCtx = mainBuffer.drawingContext;
+		mainCtx.save();
+		mainCtx.globalCompositeOperation = "lighter";
 
 		const spawnedThisStep = this._spawnBuffer;
 
@@ -763,7 +803,7 @@ class GrowthManager {
 			}
 		}
 
-		mainBuffer.pop();
+		mainCtx.restore();
 
 		// Si alguna rama se está enfriando a gris o desvaneciendo, recomponer las capas sobre mainBuffer
 		if (needsRecomposite) {

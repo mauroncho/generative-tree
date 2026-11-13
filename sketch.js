@@ -2,6 +2,7 @@
  * CONFIG - Instancia global de configuración creada desde el esquema único (js/config.js).
  */
 const CONFIG = window.createConfig();
+const DEBUG_REPULSION_SCRATCH = { x: 0, y: 0 };
 
 /**
  * Estado encapsulado de la aplicación para evitar variables globales sueltas.
@@ -11,7 +12,6 @@ const appState = {
 	grid: null,
 	growthManager: null,
 	uiPanel: null,
-	tvBridge: null,
 	seed: 0,
 	telemetryCounter: 0,
 	resizeDebounceTimer: null,
@@ -25,6 +25,7 @@ function setup() {
 	const density = Math.min(window.devicePixelRatio || 1, 2);
 	pixelDensity(density);
 	frameRate(60);
+	noiseDetail(2, 0.5);
 
 	// Buffer persistente acumulativo (prohibido redibujar segmentos desde cero en cada frame)
 	appState.treeBuffer = createGraphics(width, height);
@@ -51,48 +52,25 @@ function setup() {
 		}
 	};
 
-	// Inicializar puente de sincronización con la pantalla TV
-	appState.tvBridge = new TVBridge(false);
-	appState.tvBridge.onConnectionChange((connected) => {
-		if (appState.uiPanel) {
-			appState.uiPanel.setTVConnected(connected);
-		}
-	});
-	appState.tvBridge.onTelemetry((tvData) => {
-		if (appState.uiPanel) {
-			appState.uiPanel.updateTVTelemetry(tvData);
-		}
-	});
-	appState.tvBridge.onAction((action, data) => {
-		dispatchAction(action, data, false);
-	});
-
 	// Inicializar interfaz de controles ocultable ([H])
 	appState.uiPanel = new UIPanel(CONFIG, {
-		onSelectState: (stateId) =>
-			dispatchAction("setState", { stateId }, true),
-		onReset: () => dispatchAction("reset", null, true),
-		onNextCorner: () => dispatchAction("nextCorner", null, true),
-		onBurst: (count, btnNum) =>
-			dispatchAction("burst", { count, btnNum }, true),
+		onSelectState: (stateId) => dispatchAction("setState", { stateId }),
+		onReset: () => dispatchAction("reset"),
+		onNextCorner: () => dispatchAction("nextCorner"),
+		onBurst: (count, btnNum) => dispatchAction("burst", { count, btnNum }),
 		onBloom: () =>
-			dispatchAction("bloom", { isSustained: false, isHeld: false }, true),
+			dispatchAction("bloom", { isSustained: false, isHeld: false }),
 		onElectricShock: () =>
-			dispatchAction("shock", { isSustained: false, isHeld: false }, true),
-		onToggleSimultaneous: () =>
-			dispatchAction("toggleSimultaneous", null, true),
+			dispatchAction("shock", { isSustained: false, isHeld: false }),
+		onToggleSimultaneous: () => dispatchAction("toggleSimultaneous"),
 		onSimultaneousEnabled: () =>
-			dispatchAction("burst", { count: 2, btnNum: 1 }, true),
-		onSave: () => dispatchAction("save", null, true),
+			dispatchAction("burst", { count: 2, btnNum: 1 }),
+		onSave: () => dispatchAction("save"),
 		onToggleFullScreen: (forceState) => toggleFullScreen(forceState),
-		onToggleTV: () => toggleTVWindow(),
 		onResizeCanvas: () => {
 			if (!CONFIG.fullScreen) {
 				scheduleCanvasResize(CONFIG.canvasWidth, CONFIG.canvasHeight);
 			}
-		},
-		onParamChange: (key, val) => {
-			if (appState.tvBridge) appState.tvBridge.sendParam(key, val);
 		},
 	});
 
@@ -114,60 +92,46 @@ function setup() {
 			appState.growthManager.pendingStateId,
 		);
 	}
-	initMidiIntegration();
 }
 
 /**
  * Despachador centralizado de acciones performáticas y de sistema para evitar
- * duplicar lógica entre UIPanel, TVBridge, WebMIDI y atajos de teclado.
+ * duplicar lógica entre UIPanel y atajos de teclado.
  */
-function dispatchAction(action, data = null, notifyTV = true) {
+function dispatchAction(action, data = null) {
 	switch (action) {
-		case "reset": {
-			const forcedSeed = data?.seed;
-			resetSimulation(forcedSeed);
-			if (notifyTV && appState.tvBridge) {
-				appState.tvBridge.sendAction("reset", { seed: appState.seed });
-			}
+		case "reset":
+			resetSimulation(data?.seed);
 			break;
-		}
 		case "nextCorner":
 			appState.growthManager.triggerNextCorner();
-			if (notifyTV && appState.tvBridge) {
-				appState.tvBridge.sendAction("nextCorner");
-			}
 			break;
 		case "burst": {
 			const count = data?.count || 2;
 			const btnNum = data?.btnNum ?? (count >= 2 && count <= 4 ? count - 1 : 0);
-			triggerBurstAction(count, btnNum, notifyTV);
+			triggerBurstAction(count, btnNum);
 			break;
 		}
 		case "burst2":
-			triggerBurstAction(2, 1, notifyTV);
+			triggerBurstAction(2, 1);
 			break;
 		case "burst3":
-			triggerBurstAction(3, 2, notifyTV);
+			triggerBurstAction(3, 2);
 			break;
 		case "burst4":
-			triggerBurstAction(4, 3, notifyTV);
+			triggerBurstAction(4, 3);
 			break;
 		case "bloom":
-			triggerBloomAction(
-				Boolean(data?.isSustained),
-				Boolean(data?.isHeld),
-				notifyTV,
-			);
+			triggerBloomAction(Boolean(data?.isSustained), Boolean(data?.isHeld));
 			break;
 		case "shock":
 			triggerElectricShockAction(
 				Boolean(data?.isSustained),
 				Boolean(data?.isHeld),
-				notifyTV,
 			);
 			break;
 		case "toggleSimultaneous":
-			toggleSimultaneousMode(notifyTV);
+			toggleSimultaneousMode();
 			break;
 		case "setState": {
 			const stateId = String(data?.stateId || "").toUpperCase();
@@ -176,86 +140,12 @@ function dispatchAction(action, data = null, notifyTV = true) {
 					stateId,
 					Boolean(data?.immediate),
 				);
-				if (notifyTV && appState.tvBridge) {
-					appState.tvBridge.sendAction("setState", {
-						stateId,
-						immediate: Boolean(data?.immediate),
-					});
-				}
 			}
 			break;
 		}
 		case "save":
 			saveHighResPNG();
-			if (notifyTV && appState.tvBridge) {
-				appState.tvBridge.sendAction("save");
-			}
 			break;
-	}
-}
-
-/**
- * Crea un adaptador desacoplado para que el subsistema MIDI pueda leer/modificar
- * parámetros y disparar acciones performáticas sincronizando UI y salida CRT (TVBridge).
- */
-function initMidiIntegration() {
-	const midiAdapter = {
-		uiPanel: appState.uiPanel,
-		getParamValue: (key) => CONFIG[key],
-		setParamValue: (key, val) => {
-			if (!(key in CONFIG)) return;
-			CONFIG[key] = val;
-
-			if (appState.uiPanel) {
-				if (typeof val === "boolean") {
-					appState.uiPanel.syncCheckboxes();
-				} else {
-					appState.uiPanel.updateSlider(key, val);
-				}
-			}
-
-			if (appState.tvBridge) {
-				appState.tvBridge.sendParam(key, val);
-			}
-
-			if (
-				(key === "canvasWidth" || key === "canvasHeight") &&
-				!CONFIG.fullScreen
-			) {
-				scheduleCanvasResize(CONFIG.canvasWidth, CONFIG.canvasHeight);
-			}
-		},
-		triggerAction: (actionKey, meta) => {
-			if (actionKey === "bloom" || actionKey === "shock") {
-				dispatchAction(
-					actionKey,
-					{ isSustained: true, isHeld: meta?.isPressed ?? true },
-					true,
-				);
-			} else {
-				dispatchAction(actionKey, meta, true);
-			}
-		},
-	};
-
-	if (window.MidiSystem) {
-		window.MidiSystem.connectSketch(midiAdapter);
-	} else {
-		window.pendingSketchMidiAdapter = midiAdapter;
-	}
-}
-
-/**
- * Abre o enfoca la ventana pop-up dedicada para la tele de tubo.
- */
-function toggleTVWindow() {
-	if (!appState.tvBridge) return;
-	if (appState.tvBridge.isTVOpen()) {
-		if (appState.tvBridge.tvWindow) {
-			appState.tvBridge.tvWindow.focus();
-		}
-	} else {
-		appState.tvBridge.openTVWindow("display.html");
 	}
 }
 
@@ -289,7 +179,7 @@ function toggleFullScreen(forceState) {
 }
 
 /**
- * Debounce para cambios continuos de resolución desde sliders/MIDI, evitando
+ * Debounce para cambios continuos de resolución desde sliders, evitando
  * destruir y recrear buffers de GPU en cada píxel de arrastre.
  */
 function scheduleCanvasResize(targetW, targetH) {
@@ -345,9 +235,6 @@ function applyCanvasDimensions(targetW, targetH) {
 	}
 
 	resetSimulation();
-	if (appState.tvBridge) {
-		appState.tvBridge.sendAction("reset", { seed: appState.seed });
-	}
 }
 
 function windowResized() {
@@ -366,6 +253,7 @@ function resetSimulation(forcedSeed = null) {
 			: Math.floor(Math.random() * 900000) + 100000;
 	randomSeed(appState.seed);
 	noiseSeed(appState.seed);
+	noiseDetail(2, 0.5);
 
 	appState.grid.clear();
 
@@ -401,7 +289,6 @@ function updateLocalTelemetry() {
 		appState.growthManager.getTelemetryInfo(),
 		appState.growthManager.activeTips.length,
 		frameRate(),
-		appState.seed,
 	);
 }
 
@@ -409,8 +296,8 @@ function draw() {
 	// 1. Avanzar simulación e inyectar únicamente los segmentos nuevos en el buffer persistente
 	appState.growthManager.stepAndRender(appState.treeBuffer);
 
-	// 2. Volcar el buffer acumulativo persistente al lienzo en O(1)
-	image(appState.treeBuffer, 0, 0);
+	// 2. Volcar el buffer acumulativo persistente al lienzo en O(1) usando drawImage nativo
+	drawingContext.drawImage(appState.treeBuffer.elt, 0, 0, width, height);
 
 	// 3. Modo de inspección opcional de la SpatialGrid ([G])
 	if (CONFIG.showDebugGrid) {
@@ -445,8 +332,10 @@ function drawDebugRepulsionProbe() {
 		mouseY,
 		3,
 		freeOverlap,
+		DEBUG_REPULSION_SCRATCH,
 	);
-	if (repulsion.magSq() <= 0.0001) {
+	const magSq = repulsion.x * repulsion.x + repulsion.y * repulsion.y;
+	if (magSq <= 0.0001) {
 		return;
 	}
 
@@ -458,92 +347,59 @@ function drawDebugRepulsionProbe() {
 }
 
 /**
- * Acciones performáticas rápidas ([1] a [6]) sincronizadas con UI y salida CRT.
+ * Acciones performáticas rápidas ([1] a [6]) sincronizadas con el panel UI.
  */
-function triggerBurstAction(count, btnNum, notifyTV = true) {
+function triggerBurstAction(count, btnNum) {
 	appState.growthManager.triggerSimultaneousBurst(count);
 	if (appState.uiPanel && btnNum) {
 		appState.uiPanel.flashPerformativeBtn(btnNum);
 	}
-	if (notifyTV && appState.tvBridge) {
-		appState.tvBridge.sendAction("burst", { count });
-	}
 }
 
-function triggerBloomAction(
-	isSustained = false,
-	isHeld = false,
-	notifyTV = true,
-) {
+function triggerBloomAction(isSustained = false, isHeld = false) {
 	if (isSustained) {
 		appState.growthManager.setBloomSustained(isHeld);
 		if (appState.uiPanel) {
 			appState.uiPanel.setPerformativeBtnState(4, isHeld);
-		}
-		if (notifyTV && appState.tvBridge) {
-			appState.tvBridge.sendAction("bloom", { isSustained: true, isHeld });
 		}
 	} else {
 		appState.growthManager.triggerBloom();
 		if (appState.uiPanel) {
 			appState.uiPanel.flashPerformativeBtn(4);
 		}
-		if (notifyTV && appState.tvBridge) {
-			appState.tvBridge.sendAction("bloom", { isSustained: false });
-		}
 	}
 }
 
-function triggerElectricShockAction(
-	isSustained = false,
-	isHeld = false,
-	notifyTV = true,
-) {
+function triggerElectricShockAction(isSustained = false, isHeld = false) {
 	if (isSustained) {
 		appState.growthManager.setShockSustained(isHeld);
 		if (appState.uiPanel) {
 			appState.uiPanel.setPerformativeBtnState(5, isHeld);
-		}
-		if (notifyTV && appState.tvBridge) {
-			appState.tvBridge.sendAction("shock", { isSustained: true, isHeld });
 		}
 	} else {
 		appState.growthManager.triggerElectricShock();
 		if (appState.uiPanel) {
 			appState.uiPanel.flashPerformativeBtn(5, 900);
 		}
-		if (notifyTV && appState.tvBridge) {
-			appState.tvBridge.sendAction("shock", { isSustained: false });
-		}
 	}
 }
 
-function toggleSimultaneousMode(notifyTV = true) {
+function toggleSimultaneousMode() {
 	CONFIG.simultaneousMode = !CONFIG.simultaneousMode;
 	if (appState.uiPanel) {
 		appState.uiPanel.syncCheckboxes();
 	}
-	if (notifyTV && appState.tvBridge) {
-		appState.tvBridge.sendParam("simultaneousMode", CONFIG.simultaneousMode);
-	}
 	if (CONFIG.simultaneousMode) {
 		appState.growthManager.triggerSimultaneousBurst(2);
-		if (notifyTV && appState.tvBridge) {
-			appState.tvBridge.sendAction("burst", { count: 2 });
-		}
 	}
 }
 
 function keyPressed() {
 	return window.handleSharedKeyPressed(key, {
-		onAction: (act, payload) => dispatchAction(act, payload, true),
+		onAction: (act, payload) => dispatchAction(act, payload),
 		onToggleFullScreen: () => toggleFullScreen(),
-		onToggleTV: () => toggleTVWindow(),
 		onToggleDebugGrid: () => {
 			CONFIG.showDebugGrid = !CONFIG.showDebugGrid;
-			if (appState.tvBridge) {
-				appState.tvBridge.sendParam("showDebugGrid", CONFIG.showDebugGrid);
-			}
 			if (appState.uiPanel) {
 				appState.uiPanel.syncCheckboxes();
 			}
@@ -558,7 +414,7 @@ function keyPressed() {
 
 function keyReleased() {
 	window.handleSharedKeyReleased(key, {
-		onAction: (act, payload) => dispatchAction(act, payload, true),
+		onAction: (act, payload) => dispatchAction(act, payload),
 	});
 }
 

@@ -39,7 +39,7 @@ function getRepulsionKernel(radiusCells) {
 /**
  * SpatialGrid - Grilla espacial ligera para gestionar densidad de ocupación,
  * tolerancia de superposición (apilamiento libre), vectores de evasión suave
- * y descuento exacto de densidad cuando se borran ramas antiguas.
+ * y descuento acotado de densidad cuando se enfrían o borran ramas antiguas.
  */
 class SpatialGrid {
 	constructor(width, height, cellSize = 12, margin = 36) {
@@ -82,39 +82,32 @@ class SpatialGrid {
 	}
 
 	/**
-	 * Crea un arreglo Float32Array vacío del mismo tamaño que la grilla
-	 * para registrar el aporte individual de un árbol.
+	 * Crea una estructura de contribución por árbol con rango de índices activos [minIdx, maxIdx]
+	 * para no tener que iterar las celdas vacías al enfriar o borrar el árbol.
 	 */
 	createContributionArray() {
-		return new Float32Array(this.cols * this.rows);
+		const len = this.cols * this.rows;
+		return {
+			data: new Float32Array(len),
+			minIdx: len,
+			maxIdx: -1,
+		};
 	}
 
 	/**
-	 * Convierte coordenadas de píxeles (x, y) a índices de celda (col, row).
+	 * Limpia únicamente el rango de celdas que fueron utilizadas por la contribución de un árbol.
 	 */
-	getCellCoords(x, y) {
-		const col = Math.floor(x * this.invCellSize);
-		const row = Math.floor(y * this.invCellSize);
-		return { col, row };
-	}
-
-	/**
-	 * Verifica si una celda (col, row) está dentro de las dimensiones de la matriz.
-	 */
-	isValidCell(col, row) {
-		return col >= 0 && col < this.cols && row >= 0 && row < this.rows;
-	}
-
-	/**
-	 * Verifica si el centro de una celda (col, row) cae dentro del marco interno.
-	 */
-	isCellInsideBounds(col, row) {
-		return (
-			col >= this.minInnerCol &&
-			col <= this.maxInnerCol &&
-			row >= this.minInnerRow &&
-			row <= this.maxInnerRow
-		);
+	resetContribution(treeContribution) {
+		if (!treeContribution) return;
+		if (treeContribution.maxIdx >= treeContribution.minIdx) {
+			treeContribution.data.fill(
+				0,
+				treeContribution.minIdx,
+				treeContribution.maxIdx + 1,
+			);
+		}
+		treeContribution.minIdx = treeContribution.data.length;
+		treeContribution.maxIdx = -1;
 	}
 
 	/**
@@ -130,16 +123,9 @@ class SpatialGrid {
 	}
 
 	/**
-	 * Índice lineal en el Float32Array para (col, row).
-	 */
-	getIndex(col, row) {
-		return row * this.cols + col;
-	}
-
-	/**
 	 * Registra densidad en la posición (x, y), difunde una fracción ligera a las
 	 * 4 celdas vecinas y opcionalmente anota el mismo aporte en treeContribution
-	 * para poder restarlo cuando ese árbol antiguo se desvanezca.
+	 * acotando su rango [minIdx, maxIdx].
 	 */
 	addDensity(x, y, amount = 1.0, treeContribution = null) {
 		const col = Math.floor(x * this.invCellSize);
@@ -150,73 +136,69 @@ class SpatialGrid {
 
 		const cols = this.cols;
 		const centerIdx = row * cols + col;
-		this.cells[centerIdx] += amount;
-		if (treeContribution) {
-			treeContribution[centerIdx] += amount;
-		}
+		const cells = this.cells;
+		cells[centerIdx] += amount;
 
 		const neighborWeight = amount * 0.15;
+		const hasRight = col + 1 < cols;
+		const hasLeft = col - 1 >= 0;
+		const hasBottom = row + 1 < this.rows;
+		const hasTop = row - 1 >= 0;
 
-		// Vecino derecho (col + 1, row)
-		if (col + 1 < cols) {
-			const idx = centerIdx + 1;
-			this.cells[idx] += neighborWeight;
-			if (treeContribution) treeContribution[idx] += neighborWeight;
-		}
-		// Vecino izquierdo (col - 1, row)
-		if (col - 1 >= 0) {
-			const idx = centerIdx - 1;
-			this.cells[idx] += neighborWeight;
-			if (treeContribution) treeContribution[idx] += neighborWeight;
-		}
-		// Vecino inferior (col, row + 1)
-		if (row + 1 < this.rows) {
-			const idx = centerIdx + cols;
-			this.cells[idx] += neighborWeight;
-			if (treeContribution) treeContribution[idx] += neighborWeight;
-		}
-		// Vecino superior (col, row - 1)
-		if (row - 1 >= 0) {
-			const idx = centerIdx - cols;
-			this.cells[idx] += neighborWeight;
-			if (treeContribution) treeContribution[idx] += neighborWeight;
-		}
-	}
+		if (hasRight) cells[centerIdx + 1] += neighborWeight;
+		if (hasLeft) cells[centerIdx - 1] += neighborWeight;
+		if (hasBottom) cells[centerIdx + cols] += neighborWeight;
+		if (hasTop) cells[centerIdx - cols] += neighborWeight;
 
-	/**
-	 * Resta de la grilla global una fracción (scale) del aporte de un árbol antiguo
-	 * cuando se va desvaneciendo al superar maxVisibleTrees.
-	 */
-	/**
-	 * Ajusta en la grilla global una fracción con signo (deltaScale) del aporte de un árbol.
-	 * Un deltaScale negativo descuenta densidad (al enfriar a gris o desvanecer);
-	 * un deltaScale positivo permite restaurarla en vivo al debugear desde el slider.
-	 */
-	adjustContribution(treeContribution, deltaScale = 0.0) {
-		if (!treeContribution || Math.abs(deltaScale) <= 0.00001) {
-			return;
-		}
-		const cells = this.cells;
-		const len = cells.length;
-		for (let i = 0; i < len; i++) {
-			const contrib = treeContribution[i];
-			if (contrib > 0) {
-				const next = cells[i] + contrib * deltaScale;
-				cells[i] = next > 0 ? next : 0;
+		if (treeContribution) {
+			const cData = treeContribution.data;
+			cData[centerIdx] += amount;
+			if (hasRight) cData[centerIdx + 1] += neighborWeight;
+			if (hasLeft) cData[centerIdx - 1] += neighborWeight;
+			if (hasBottom) cData[centerIdx + cols] += neighborWeight;
+			if (hasTop) cData[centerIdx - cols] += neighborWeight;
+
+			const minTouched = hasTop
+				? centerIdx - cols
+				: hasLeft
+					? centerIdx - 1
+					: centerIdx;
+			const maxTouched = hasBottom
+				? centerIdx + cols
+				: hasRight
+					? centerIdx + 1
+					: centerIdx;
+
+			if (minTouched < treeContribution.minIdx) {
+				treeContribution.minIdx = minTouched;
+			}
+			if (maxTouched > treeContribution.maxIdx) {
+				treeContribution.maxIdx = maxTouched;
 			}
 		}
 	}
 
-	subtractContribution(treeContribution, scale = 1.0) {
-		if (!treeContribution) {
+	/**
+	 * Ajusta en la grilla global una fracción con signo (deltaScale) del aporte de un árbol,
+	 * recorriendo únicamente el intervalo [minIdx, maxIdx] de celdas realmente tocadas.
+	 */
+	adjustContribution(treeContribution, deltaScale = 0.0) {
+		if (
+			!treeContribution ||
+			treeContribution.maxIdx < treeContribution.minIdx ||
+			Math.abs(deltaScale) <= 0.00001
+		) {
 			return;
 		}
 		const cells = this.cells;
-		const len = cells.length;
-		for (let i = 0; i < len; i++) {
-			const contrib = treeContribution[i];
+		const cData = treeContribution.data;
+		const start = treeContribution.minIdx;
+		const end = treeContribution.maxIdx;
+
+		for (let i = start; i <= end; i++) {
+			const contrib = cData[i];
 			if (contrib > 0) {
-				const next = cells[i] - contrib * scale;
+				const next = cells[i] + contrib * deltaScale;
 				cells[i] = next > 0 ? next : 0;
 			}
 		}
@@ -238,13 +220,6 @@ class SpatialGrid {
 		}
 
 		return this.cells[row * this.cols + col];
-	}
-
-	/**
-	 * Consulta si la celda en (x, y) superó el umbral de saturación permitido.
-	 */
-	isSaturated(x, y, maxDensity) {
-		return this.getDensity(x, y) >= maxDensity;
 	}
 
 	/**

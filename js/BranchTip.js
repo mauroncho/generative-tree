@@ -7,6 +7,18 @@ const COS_PROBE = Math.cos(0.85);
 const SIN_PROBE = Math.sin(0.85);
 
 /**
+ * Rota un vector 2D in-place sin pasar por el overhead de validación de p5.Vector.rotate().
+ */
+function rotateVec2(vec, angle) {
+	const c = Math.cos(angle);
+	const s = Math.sin(angle);
+	const x = vec.x;
+	const y = vec.y;
+	vec.x = x * c - y * s;
+	vec.y = x * s + y * c;
+}
+
+/**
  * Traza un segmento directamente sobre el CanvasRenderingContext2D nativo
  * para evitar la creación de miles de instancias de p5.Color por frame.
  */
@@ -31,10 +43,9 @@ class BranchTip {
 		this.pos = pos.copy();
 		this.prevPos = pos.copy();
 		this.dir = dir.copy().normalize();
+		// initialDir es de solo lectura: compartir referencia evita alocar un p5.Vector por cada sub-rama
 		this.initialDir =
-			options.initialDir !== undefined
-				? options.initialDir.copy().normalize()
-				: this.dir.copy();
+			options.initialDir !== undefined ? options.initialDir : this.dir.copy();
 		this.generation = generation;
 		this.energy = energy;
 
@@ -42,6 +53,18 @@ class BranchTip {
 			options.noiseOffset !== undefined
 				? options.noiseOffset
 				: random(0, 10000);
+
+		// Constantes por generación precalculadas una única vez al nacer la punta
+		this.genDecay = Math.pow(0.57, generation);
+		this.depositWeight = Math.max(0.14, Math.pow(0.68, generation));
+		this.genJitterScale = 1.0 + Math.min(generation, 5) * 0.14;
+		this.inertiaFactor =
+			generation === 0
+				? 0.35
+				: generation === 1
+					? 0.65
+					: 1.0 + Math.min(generation, 4) * 0.15;
+		this.stepScale = generation > 2 ? 0.85 : 1.0;
 
 		const subLengthMult = options.subBranchLength ?? 1.0;
 		this.energyDecay =
@@ -51,11 +74,28 @@ class BranchTip {
 
 		this.hasPassedCenter = options.hasPassedCenter ?? false;
 		this.treeRecord = options.treeRecord ?? null;
+		if (this.treeRecord) {
+			this.expandTreeBounds(this.pos.x, this.pos.y);
+		}
+
 		this.ageSteps = 0;
 		this.stepsSinceBranch = 0;
 		this.lastBranchSide = random() < 0.5 ? -1 : 1;
 		this.thickness = this.computeThickness();
 		this.isDead = false;
+	}
+
+	/**
+	 * Actualiza el bounding box en píxeles del árbol al que pertenece esta punta,
+	 * permitiendo que las pasadas de enfriamiento y limpieza operen solo en el área ocupada.
+	 */
+	expandTreeBounds(x, y) {
+		const rec = this.treeRecord;
+		if (!rec) return;
+		if (x < rec.minX) rec.minX = x;
+		if (x > rec.maxX) rec.maxX = x;
+		if (y < rec.minY) rec.minY = y;
+		if (y > rec.maxY) rec.maxY = y;
 	}
 
 	/**
@@ -81,7 +121,7 @@ class BranchTip {
 	}
 
 	/**
-	 * Calcula el grosor con caída exponencial por generación y energía.
+	 * Calcula el grosor con caída exponencial por generación (precalculada) y energía.
 	 */
 	computeThickness() {
 		const clampedEnergy = Math.max(0, this.energy);
@@ -90,9 +130,8 @@ class BranchTip {
 			return 0.3 + 0.5 * Math.pow(clampedEnergy, 0.7);
 		}
 
-		const genDecay = Math.pow(0.57, this.generation);
 		const energyCurve = Math.pow(clampedEnergy, 0.65);
-		return Math.max(0.35, 3.5 * genDecay * energyCurve);
+		return Math.max(0.35, 3.5 * this.genDecay * energyCurve);
 	}
 
 	/**
@@ -104,7 +143,8 @@ class BranchTip {
 			return;
 		}
 
-		this.prevPos.set(this.pos);
+		this.prevPos.x = this.pos.x;
+		this.prevPos.y = this.pos.y;
 		this.ageSteps++;
 		this.stepsSinceBranch++;
 
@@ -121,7 +161,7 @@ class BranchTip {
 		const smoothDrift = (n - 0.5) * 2.0 * effectiveVariance * 0.24;
 
 		// 2. Sacudida dieléctrica (jitter continuo + quiebres angulares súbitos estilo Lichtenberg)
-		const genJitterScale = 1.0 + Math.min(this.generation, 5) * 0.14;
+		const genJitterScale = this.genJitterScale;
 		let kinkAngle = random(-0.08, 0.08) * effectiveVariance * genJitterScale;
 
 		const kinkChance = 0.22 + shockIntensity * 0.45;
@@ -133,7 +173,7 @@ class BranchTip {
 				sign * random(kinkMin, kinkMax) * effectiveVariance * genJitterScale;
 		}
 
-		this.dir.rotate(smoothDrift + kinkAngle);
+		rotateVec2(this.dir, smoothDrift + kinkAngle);
 
 		// 3. Tendencia hacia el centro para las líneas principales (gen 0) sin alocar p5.Vector
 		if (
@@ -185,32 +225,38 @@ class BranchTip {
 
 			const repMagSq = repulsion.x * repulsion.x + repulsion.y * repulsion.y;
 			if (repMagSq > 0.0001) {
-				const inertiaFactor =
-					this.generation === 0
-						? 0.35
-						: this.generation === 1
-							? 0.65
-							: 1.0 + Math.min(this.generation, 4) * 0.15;
-
-				const repScale = config.repulsionStrength * inertiaFactor;
+				const repScale = config.repulsionStrength * this.inertiaFactor;
 				this.dir.x += repulsion.x * repScale;
 				this.dir.y += repulsion.y * repScale;
 			}
 		}
 
-		this.dir.normalize();
+		// Normalización escalar directa
+		const dirMagSq = this.dir.x * this.dir.x + this.dir.y * this.dir.y;
+		if (dirMagSq > 0.000001) {
+			const invDirMag = 1.0 / Math.sqrt(dirMagSq);
+			this.dir.x *= invDirMag;
+			this.dir.y *= invDirMag;
+		}
 
 		// 5. Cono de seguridad frontal: impide que un tronco principal gire hacia su propia esquina
 		if (this.generation === 0 && !this.hasPassedCenter) {
 			const forwardDot =
 				this.dir.x * this.initialDir.x + this.dir.y * this.initialDir.y;
 			if (forwardDot < 0.38) {
-				this.dir.lerp(this.initialDir, 0.45).normalize();
+				this.dir.x += (this.initialDir.x - this.dir.x) * 0.45;
+				this.dir.y += (this.initialDir.y - this.dir.y) * 0.45;
+				const coneMagSq = this.dir.x * this.dir.x + this.dir.y * this.dir.y;
+				if (coneMagSq > 0.000001) {
+					const invConeMag = 1.0 / Math.sqrt(coneMagSq);
+					this.dir.x *= invConeMag;
+					this.dir.y *= invConeMag;
+				}
 			}
 		}
 
 		// 6. Avanzar posición escalarmente (cero alocación de vectores)
-		const step = config.stepLength * (this.generation > 2 ? 0.85 : 1.0);
+		const step = config.stepLength * this.stepScale;
 		this.pos.x += this.dir.x * step;
 		this.pos.y += this.dir.y * step;
 
@@ -218,8 +264,15 @@ class BranchTip {
 		if (!grid.isInsideBounds(this.pos.x, this.pos.y)) {
 			this.pos.x = constrain(this.pos.x, grid.bounds.left, grid.bounds.right);
 			this.pos.y = constrain(this.pos.y, grid.bounds.top, grid.bounds.bottom);
+			if (this.treeRecord) {
+				this.expandTreeBounds(this.pos.x, this.pos.y);
+			}
 			this.isDead = true;
 			return;
+		}
+
+		if (this.treeRecord) {
+			this.expandTreeBounds(this.pos.x, this.pos.y);
 		}
 
 		// 8. Control de superposición y saturación (respetando el período de gracia al nacer)
@@ -250,11 +303,10 @@ class BranchTip {
 		}
 
 		// 9. Registrar densidad en la grilla espacial global y en el registro del árbol actual
-		const depositWeight = Math.max(0.14, Math.pow(0.68, this.generation));
 		grid.addDensity(
 			this.pos.x,
 			this.pos.y,
-			depositWeight,
+			this.depositWeight,
 			this.treeRecord ? this.treeRecord.gridContribution : null,
 		);
 
@@ -355,7 +407,7 @@ class BranchTip {
 
 		const motherRecoil =
 			this.generation === 0 ? random(0.03, 0.09) : random(0.06, 0.15);
-		this.dir.rotate(-primarySide * motherRecoil);
+		rotateVec2(this.dir, -primarySide * motherRecoil);
 
 		if (this.generation === 0) {
 			this.energy *= 0.99;
@@ -403,7 +455,7 @@ class BranchTip {
 			children.push(childC);
 		}
 
-		this.dir.rotate(random(-0.18, 0.18));
+		rotateVec2(this.dir, random(-0.18, 0.18));
 		return children;
 	}
 
@@ -424,7 +476,8 @@ class BranchTip {
 
 		const baseOpenAngle =
 			random(0.38, 0.96) * (0.75 + config.angleVariance * 0.5);
-		const childDir = this.dir.copy().rotate(sideSign * baseOpenAngle);
+		const childDir = this.dir.copy();
+		rotateVec2(childDir, sideSign * baseOpenAngle);
 
 		let childEnergy;
 		if (this.generation === 0) {
@@ -486,6 +539,13 @@ class BranchTip {
 		const x2 = this.pos.x;
 		const y2 = this.pos.y;
 		const ctx = buffer.drawingContext;
+
+		// Usar extremos redondos solo en troncos/ramas gruesas (Gen 0 y 1);
+		// en capilares finos (Gen 2+) "butt" ahorra la teselación de semicírculos en GPU.
+		const desiredCap = this.generation <= 1 ? "round" : "butt";
+		if (ctx.lineCap !== desiredCap) {
+			ctx.lineCap = desiredCap;
+		}
 
 		const energyFade = constrain(this.energy, 0.05, 1.0);
 

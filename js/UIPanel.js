@@ -1,8 +1,8 @@
 /**
  * UIPanel - Interfaz flotante compacta ocultable ([H]) orientada a performance en vivo.
  * Muestra el estado activo/pendiente ([Q]/[W]/[E]), las acciones performáticas ([1]-[6], [SPACE])
- * y un menú desplegable colapsado por defecto con botones de sistema, copiar parámetros (JSON),
- * todos los controles editables de PARAM_SCHEMA y el módulo MIDI opcional.
+ * y un menú desplegable colapsado por defecto con botones de sistema, copiar parámetros (JSON)
+ * y todos los controles editables de PARAM_SCHEMA.
  */
 class UIPanel {
 	constructor(config, callbacks) {
@@ -10,12 +10,10 @@ class UIPanel {
 		this.callbacks = callbacks;
 		this.isVisible = true;
 		this.isParamsOpen = false;
-		this.isMidiOpen = false;
 		this.container = null;
 		this.badgeEl = null;
 		this.cornerEl = null;
 		this.statsEl = null;
-		this.btnTV = null;
 		this.btnFullScreen = null;
 		this.btnCopyParams = null;
 		this.drawerToggleBtn = null;
@@ -24,7 +22,6 @@ class UIPanel {
 		this.stateButtons = {};
 		this.activeStateId = "Q";
 		this.pendingStateId = null;
-		this.isTVConnected = false;
 
 		this.sliders = new Map();
 		this.checkboxes = new Map();
@@ -35,7 +32,7 @@ class UIPanel {
 
 	buildDOM() {
 		this.container = document.createElement("aside");
-		this.container.className = "ui-panel ui-panel-compact";
+		this.container.className = "ui-panel";
 
 		const stopProp = (e) => e.stopPropagation();
 		this.container.addEventListener("mousedown", stopProp);
@@ -92,7 +89,7 @@ class UIPanel {
 		// Bloque 2: Acciones Performáticas [1–6] + [SPACE]
 		this.buildPerformativeSection();
 
-		// Bloque 3: Menú desplegable colapsado (Sistema, Copiar Params, Parámetros editables, MIDI)
+		// Bloque 3: Menú desplegable colapsado (Sistema, Copiar Params, Parámetros editables)
 		this.buildCollapsibleDrawer();
 
 		document.body.appendChild(this.container);
@@ -129,7 +126,12 @@ class UIPanel {
 		};
 
 		for (const id of ["Q", "W", "E"]) {
-			const def = states[id] || { id, key: id, label: `Estado ${id}`, params: {} };
+			const def = states[id] || {
+				id,
+				key: id,
+				label: `Estado ${id}`,
+				params: {},
+			};
 			const btn = document.createElement("button");
 			btn.className = "ui-btn ui-state-btn";
 			const hasParams = def.params && Object.keys(def.params).length > 0;
@@ -302,43 +304,18 @@ class UIPanel {
 		const btnSave = this.createButton("Guardar PNG [S]", () =>
 			this.callbacks.onSave?.(),
 		);
-		this.btnTV = this.createButton("Salida CRT [P]", () =>
-			this.callbacks.onToggleTV?.(),
-		);
-		this.btnTV.classList.add("tv-btn");
-
 		this.btnFullScreen = this.createButton("Full Screen [F]", () =>
 			this.callbacks.onToggleFullScreen?.(),
 		);
+		this.btnFullScreen.classList.add("ui-btn-span2");
 
 		sysGrid.appendChild(btnReset);
 		sysGrid.appendChild(btnSave);
-		sysGrid.appendChild(this.btnTV);
 		sysGrid.appendChild(this.btnFullScreen);
 		this.drawerEl.appendChild(sysGrid);
 
 		// 3. Todos los parámetros actuales editables (PARAM_SCHEMA)
 		this.buildSchemaSections(this.drawerEl);
-
-		// 4. Sección MIDI opcional colapsada aparte (para no borrar la integración)
-		const midiToggle = document.createElement("button");
-		midiToggle.className = "ui-drawer-toggle ui-midi-subtoggle";
-		midiToggle.textContent = "▸ MIDI (Opcional)";
-		this.drawerEl.appendChild(midiToggle);
-
-		const midiHolder = document.createElement("div");
-		midiHolder.className = "hidden";
-		this.buildMidiSection(midiHolder);
-		this.drawerEl.appendChild(midiHolder);
-
-		midiToggle.addEventListener("click", () => {
-			midiToggle.blur();
-			this.isMidiOpen = !this.isMidiOpen;
-			midiHolder.classList.toggle("hidden", !this.isMidiOpen);
-			midiToggle.textContent = this.isMidiOpen
-				? "▾ MIDI (Opcional)"
-				: "▸ MIDI (Opcional)";
-		});
 
 		wrapper.appendChild(this.drawerEl);
 		this.container.appendChild(wrapper);
@@ -533,7 +510,6 @@ class UIPanel {
 			this.config[key] = num;
 			valSpan.textContent = format(num);
 			onChange?.(num);
-			this.callbacks.onParamChange?.(key, num);
 		});
 
 		row.appendChild(topLine);
@@ -568,8 +544,6 @@ class UIPanel {
 		if (this.btnFullScreen && !this.config.fullScreen) {
 			this.btnFullScreen.textContent = "Full Screen [F]";
 		}
-		this.callbacks.onParamChange?.("canvasWidth", w);
-		this.callbacks.onParamChange?.("canvasHeight", h);
 		this.callbacks.onResizeCanvas?.();
 	}
 
@@ -583,7 +557,6 @@ class UIPanel {
 		input.addEventListener("change", () => {
 			this.config[key] = input.checked;
 			onChange?.(input.checked);
-			this.callbacks.onParamChange?.(key, input.checked);
 		});
 
 		this.checkboxes.set(key, input);
@@ -651,16 +624,6 @@ class UIPanel {
 		this.container.classList.toggle("hidden", !this.isVisible);
 	}
 
-	setTVConnected(connected) {
-		this.isTVConnected = connected;
-		if (this.btnTV) {
-			this.btnTV.classList.toggle("tv-active", connected);
-			this.btnTV.textContent = connected
-				? "🟢 CRT Conectada"
-				: "Salida CRT [P]";
-		}
-	}
-
 	_applyTelemetryDOM(badgeText, statusType, cornerText, statsText) {
 		if (this.badgeEl.textContent !== badgeText) {
 			this.badgeEl.textContent = badgeText;
@@ -676,35 +639,8 @@ class UIPanel {
 		}
 	}
 
-	updateTVTelemetry(tvData) {
-		if (!this.isVisible || !this.isTVConnected || !tvData?.info) {
-			return;
-		}
-		const { info, activeCount, fps } = tvData;
-		const visText =
-			info.visibleCount !== undefined
-				? `Visibles: ${info.visibleCount}/${info.maxVis} | `
-				: "";
-		this._applyTelemetryDOM(
-			`[TV] ${info.statusBadge}`,
-			info.statusType,
-			info.cornerText,
-			`${visText}Puntas: ${activeCount} | TV FPS: ${fps}`,
-		);
-	}
-
-	updateTelemetry(telemetryInfo, activeCount, fps, seed) {
-		if (!this.isVisible || this.isTVConnected || !telemetryInfo) {
-			return;
-		}
-
-		if (typeof telemetryInfo === "string") {
-			this._applyTelemetryDOM(
-				telemetryInfo,
-				"growing",
-				"",
-				`Puntas: ${activeCount} | FPS: ${Math.round(fps)} | Seed: ${seed}`,
-			);
+	updateTelemetry(telemetryInfo, activeCount, fps) {
+		if (!this.isVisible || !telemetryInfo) {
 			return;
 		}
 
@@ -718,375 +654,6 @@ class UIPanel {
 			telemetryInfo.cornerText,
 			`${visText}Puntas: ${activeCount} | FPS: ${Math.round(fps)}`,
 		);
-	}
-
-	/**
-	 * Construye la sección de interfaz para control MIDI y diagnóstico en vivo.
-	 */
-	buildMidiSection(targetParent = this.container) {
-		this.midiSectionEl = this.createSection("🎹 Control MIDI // WebMidi.js");
-
-		// 1. Fila de estado de conexión y toggle de recepción
-		const statusRow = document.createElement("div");
-		statusRow.className = "ui-midi-status-row";
-
-		this.midiStatusBadge = document.createElement("span");
-		this.midiStatusBadge.className = "ui-midi-badge";
-		this.midiStatusBadge.dataset.state = "init";
-		this.midiStatusBadge.textContent = "INICIANDO MIDI...";
-
-		const receptionLabel = document.createElement("label");
-		receptionLabel.className = "ui-midi-toggle-inline";
-
-		this.midiReceptionCheckbox = document.createElement("input");
-		this.midiReceptionCheckbox.type = "checkbox";
-		this.midiReceptionCheckbox.checked = true;
-
-		const receptionSpan = document.createElement("span");
-		receptionSpan.textContent = "Recepción ON";
-		this.midiReceptionSpan = receptionSpan;
-
-		receptionLabel.appendChild(this.midiReceptionCheckbox);
-		receptionLabel.appendChild(receptionSpan);
-
-		statusRow.appendChild(this.midiStatusBadge);
-		statusRow.appendChild(receptionLabel);
-		this.midiSectionEl.appendChild(statusRow);
-
-		// Mensaje de error/advertencia si el navegador o contexto no soporta WebMIDI
-		this.midiErrorEl = document.createElement("div");
-		this.midiErrorEl.className = "ui-midi-error hidden";
-		this.midiSectionEl.appendChild(this.midiErrorEl);
-
-		// 2. Selector de Dispositivo de Entrada MIDI
-		const devGroup = document.createElement("div");
-		devGroup.className = "ui-control-row";
-		const devLabel = document.createElement("div");
-		devLabel.className = "ui-label-line";
-		devLabel.innerHTML = "<span>Entrada MIDI</span>";
-
-		this.midiInputSelect = document.createElement("select");
-		this.midiInputSelect.className = "ui-select";
-		const emptyOpt = document.createElement("option");
-		emptyOpt.value = "";
-		emptyOpt.textContent = "— Sin dispositivos MIDI detectados —";
-		this.midiInputSelect.appendChild(emptyOpt);
-
-		devGroup.appendChild(devLabel);
-		devGroup.appendChild(this.midiInputSelect);
-		this.midiSectionEl.appendChild(devGroup);
-
-		// 3. Selector de Perfil de Controlador (KeyLab Essential 49 vs MiniLab MK2)
-		const profGroup = document.createElement("div");
-		profGroup.className = "ui-control-row";
-		const profLabel = document.createElement("div");
-		profLabel.className = "ui-label-line";
-		profLabel.innerHTML = "<span>Perfil de Controlador</span>";
-
-		this.midiProfileSelect = document.createElement("select");
-		this.midiProfileSelect.className = "ui-select";
-
-		profGroup.appendChild(profLabel);
-		profGroup.appendChild(this.midiProfileSelect);
-		this.midiSectionEl.appendChild(profGroup);
-
-		// 4. Selector de Canal MIDI (Canal 1: p5.js | Canal 2: TouchDesigner)
-		const chanGroup = document.createElement("div");
-		chanGroup.className = "ui-control-row";
-		const chanLabel = document.createElement("div");
-		chanLabel.className = "ui-label-line";
-		chanLabel.innerHTML =
-			"<span>Canal p5.js</span><span class='ui-midi-chan-hint'>CH1: p5.js | CH2: TD</span>";
-
-		this.midiChannelSelect = document.createElement("select");
-		this.midiChannelSelect.className = "ui-select";
-		for (let ch = 1; ch <= 16; ch++) {
-			const opt = document.createElement("option");
-			opt.value = String(ch);
-			if (ch === 1) {
-				opt.textContent = "Canal 1 — p5.js (Exclusivo)";
-			} else if (ch === 2) {
-				opt.textContent = "Canal 2 — (Reservado TouchDesigner)";
-			} else {
-				opt.textContent = `Canal ${ch}`;
-			}
-			this.midiChannelSelect.appendChild(opt);
-		}
-
-		chanGroup.appendChild(chanLabel);
-		chanGroup.appendChild(this.midiChannelSelect);
-		this.midiSectionEl.appendChild(chanGroup);
-
-		// 5. Controles de Modo Diagnóstico
-		const diagToggleRow = document.createElement("label");
-		diagToggleRow.className = "ui-checkbox-row";
-		this.midiDiagCheckbox = document.createElement("input");
-		this.midiDiagCheckbox.type = "checkbox";
-		this.midiDiagCheckbox.checked = true;
-		const diagToggleText = document.createElement("span");
-		diagToggleText.textContent = "Modo Diagnóstico MIDI (Monitor en vivo)";
-		diagToggleRow.appendChild(this.midiDiagCheckbox);
-		diagToggleRow.appendChild(diagToggleText);
-		this.midiSectionEl.appendChild(diagToggleRow);
-
-		const inspectAllRow = document.createElement("label");
-		inspectAllRow.className = "ui-checkbox-row";
-		this.midiInspectAllCheckbox = document.createElement("input");
-		this.midiInspectAllCheckbox.type = "checkbox";
-		this.midiInspectAllCheckbox.checked = true;
-		const inspectAllText = document.createElement("span");
-		inspectAllText.textContent = "Diagnóstico: inspeccionar todos los canales";
-		inspectAllRow.appendChild(this.midiInspectAllCheckbox);
-		inspectAllRow.appendChild(inspectAllText);
-		this.midiSectionEl.appendChild(inspectAllRow);
-
-		// 6. Monitor de Diagnóstico (Tarjeta de último mensaje + historial + exportar)
-		this.midiDiagContainer = document.createElement("div");
-		this.midiDiagContainer.className = "ui-midi-diag-box";
-
-		this.midiLastMsgEl = document.createElement("div");
-		this.midiLastMsgEl.className = "ui-midi-last-msg";
-		this.midiLastMsgEl.innerHTML = `
-      <div class="ui-midi-empty">Esperando mensajes MIDI (CC / Note On / Note Off)...</div>
-    `;
-
-		this.midiHistoryEl = document.createElement("div");
-		this.midiHistoryEl.className = "ui-midi-history";
-
-		const diagBtns = document.createElement("div");
-		diagBtns.className = "ui-midi-diag-actions";
-
-		this.midiClearBtn = document.createElement("button");
-		this.midiClearBtn.className = "ui-btn";
-		this.midiClearBtn.textContent = "Limpiar Log";
-
-		this.midiCopyBtn = document.createElement("button");
-		this.midiCopyBtn.className = "ui-btn";
-		this.midiCopyBtn.textContent = "Copiar Plantilla (0)";
-
-		diagBtns.appendChild(this.midiClearBtn);
-		diagBtns.appendChild(this.midiCopyBtn);
-
-		this.midiDiagContainer.appendChild(this.midiLastMsgEl);
-		this.midiDiagContainer.appendChild(this.midiHistoryEl);
-		this.midiDiagContainer.appendChild(diagBtns);
-
-		this.midiSectionEl.appendChild(this.midiDiagContainer);
-		targetParent.appendChild(this.midiSectionEl);
-	}
-
-	/**
-	 * Vincula el sistema MIDI (MidiControllerSystem) con los controles del UIPanel.
-	 */
-	attachMidiSystem(midiSystem) {
-		this.midiSystem = midiSystem;
-		if (!midiSystem) return;
-
-		const profiles = midiSystem.mapping.getProfiles();
-		this.midiProfileSelect.innerHTML = "";
-		for (const prof of profiles) {
-			const opt = document.createElement("option");
-			opt.value = prof.id;
-			const roleTag = prof.role === "development" ? "Desarrollo" : "Performance";
-			opt.textContent = `${prof.name} (${roleTag})`;
-			this.midiProfileSelect.appendChild(opt);
-		}
-		this.midiProfileSelect.value = midiSystem.mapping.activeProfileId;
-
-		this.midiReceptionCheckbox.addEventListener("change", () => {
-			const enabled = this.midiReceptionCheckbox.checked;
-			this.midiReceptionSpan.textContent = enabled
-				? "Recepción ON"
-				: "Recepción OFF";
-			midiSystem.manager.setReceptionEnabled(enabled);
-		});
-
-		this.midiInputSelect.addEventListener("change", () => {
-			midiSystem.manager.selectInput(this.midiInputSelect.value);
-		});
-
-		this.midiProfileSelect.addEventListener("change", () => {
-			midiSystem.mapping.setActiveProfile(this.midiProfileSelect.value);
-		});
-
-		this.midiChannelSelect.addEventListener("change", () => {
-			midiSystem.manager.setActiveChannel(
-				Number.parseInt(this.midiChannelSelect.value, 10),
-			);
-		});
-
-		this.midiDiagCheckbox.addEventListener("change", () => {
-			const enabled = this.midiDiagCheckbox.checked;
-			midiSystem.debug.setEnabled(enabled);
-			this.midiDiagContainer.classList.toggle("hidden", !enabled);
-		});
-
-		this.midiInspectAllCheckbox.addEventListener("change", () => {
-			midiSystem.manager.setInspectAllChannelsInDebug(
-				this.midiInspectAllCheckbox.checked,
-			);
-		});
-
-		this.midiClearBtn.addEventListener("click", () => {
-			midiSystem.debug.clear();
-		});
-
-		this.midiCopyBtn.addEventListener("click", () => {
-			const jsonTemplate = midiSystem.debug.exportDiscoveredAsConfigTemplate();
-			if (navigator.clipboard?.writeText) {
-				navigator.clipboard.writeText(jsonTemplate).then(() => {
-					const prev = this.midiCopyBtn.textContent;
-					this.midiCopyBtn.textContent = "✓ Copiado al portapapeles";
-					setTimeout(() => {
-						this.midiCopyBtn.textContent = prev;
-					}, 1400);
-				});
-			}
-			console.info(
-				"[MIDI Diagnóstico] Plantilla de controles detectados:\n",
-				jsonTemplate,
-			);
-		});
-
-		midiSystem.manager.onStatusChange((status) => {
-			this._renderMidiStatus(status);
-		});
-
-		midiSystem.debug.onUpdate((snapshot) => {
-			this._renderMidiDiagnostic(snapshot);
-		});
-
-		this._renderMidiStatus(midiSystem.manager.getStatus());
-		this._renderMidiDiagnostic(midiSystem.debug.getSnapshot());
-	}
-
-	_renderMidiStatus(status) {
-		if (!status) return;
-
-		this.midiReceptionCheckbox.checked = Boolean(status.receptionEnabled);
-		this.midiReceptionSpan.textContent = status.receptionEnabled
-			? "Recepción ON"
-			: "Recepción OFF";
-		this.midiChannelSelect.value = String(status.activeChannel);
-		this.midiInspectAllCheckbox.checked = Boolean(
-			status.inspectAllChannelsInDebug,
-		);
-
-		if (this.midiSystem) {
-			this.midiProfileSelect.value = this.midiSystem.mapping.activeProfileId;
-		}
-
-		if (status.errorMessage) {
-			this.midiErrorEl.textContent = status.errorMessage;
-			this.midiErrorEl.classList.remove("hidden");
-		} else {
-			this.midiErrorEl.classList.add("hidden");
-		}
-
-		if (!status.isSupported && status.errorMessage) {
-			this.midiStatusBadge.dataset.state = "error";
-			this.midiStatusBadge.textContent = "🔴 SIN SOPORTE";
-		} else if (!status.receptionEnabled) {
-			this.midiStatusBadge.dataset.state = "paused";
-			this.midiStatusBadge.textContent = "⚪ PAUSADO";
-		} else if (status.activeInput) {
-			this.midiStatusBadge.dataset.state = "connected";
-			this.midiStatusBadge.textContent = "🟢 CONECTADO";
-		} else {
-			this.midiStatusBadge.dataset.state = "waiting";
-			this.midiStatusBadge.textContent = "🟡 SIN DISPOSITIVO";
-		}
-
-		this.midiInputSelect.innerHTML = "";
-		if (!status.inputs || status.inputs.length === 0) {
-			const opt = document.createElement("option");
-			opt.value = "";
-			opt.textContent = "— Sin entradas MIDI conectadas —";
-			this.midiInputSelect.appendChild(opt);
-		} else {
-			for (const inp of status.inputs) {
-				const opt = document.createElement("option");
-				opt.value = inp.id;
-				opt.textContent = inp.name;
-				this.midiInputSelect.appendChild(opt);
-			}
-			if (status.activeInput) {
-				this.midiInputSelect.value = status.activeInput.id;
-			}
-		}
-	}
-
-	_renderMidiDiagnostic(snapshot) {
-		if (!snapshot) return;
-
-		this.midiCopyBtn.textContent = `Copiar Plantilla (${snapshot.discoveredCount || 0})`;
-
-		const msg = snapshot.lastMessage;
-		if (!msg) {
-			this.midiLastMsgEl.innerHTML = `
-        <div class="ui-midi-empty">Esperando mensajes MIDI (CC / Note On / Note Off)...</div>
-      `;
-			this.midiHistoryEl.innerHTML = "";
-			return;
-		}
-
-		const pct = Math.round(
-			Math.max(0, Math.min(100, (msg.rawValue / 127) * 100)),
-		);
-		const numberText =
-			msg.type === "cc"
-				? `CC #${msg.number}`
-				: `Nota #${msg.number} (${msg.noteIdentifier || ""})`;
-		const noteStateText = msg.noteState ? msg.noteState : "— (Continuo)";
-		const chanBadgeClass = msg.matchesActiveChannel
-			? "chan-p5"
-			: msg.channel === 2
-				? "chan-td"
-				: "chan-other";
-		const chanRoleText = msg.matchesActiveChannel
-			? "p5.js Activo"
-			: msg.channel === 2
-				? "TouchDesigner (Ignorado en p5)"
-				: "Ignorado en p5";
-
-		this.midiLastMsgEl.innerHTML = `
-      <div class="ui-midi-grid">
-        <div><span class="k">Dispositivo:</span> <span class="v">${this._escapeHtml(msg.deviceName)}</span></div>
-        <div><span class="k">Tipo:</span> <span class="v type-${msg.type}">${msg.messageLabel}</span></div>
-        <div><span class="k">Número:</span> <span class="v">${numberText}</span></div>
-        <div><span class="k">Canal MIDI:</span> <span class="v ${chanBadgeClass}">Canal ${msg.channel} (${chanRoleText})</span></div>
-        <div><span class="k">Valor:</span> <span class="v">${msg.rawValue} / 127 (${msg.normalizedValue.toFixed(2)})</span></div>
-        <div><span class="k">Estado Note:</span> <span class="v">${noteStateText}</span></div>
-      </div>
-      <div class="ui-midi-bar-bg"><div class="ui-midi-bar-fill" style="width:${pct}%"></div></div>
-    `;
-
-		this.midiHistoryEl.innerHTML = snapshot.history
-			.map((item) => {
-				const numLabel =
-					item.type === "cc"
-						? `CC#${item.number}`
-						: `${item.noteIdentifier || `N#${item.number}`}`;
-				const cClass = item.matchesActiveChannel
-					? "chan-p5"
-					: item.channel === 2
-						? "chan-td"
-						: "chan-other";
-				return `<div class="ui-midi-hist-row">
-          <span class="h-ch ${cClass}">CH${item.channel}</span>
-          <span class="h-type">${item.messageLabel}</span>
-          <span class="h-num">${numLabel}</span>
-          <span class="h-val">val: ${item.rawValue}</span>
-        </div>`;
-			})
-			.join("");
-	}
-
-	_escapeHtml(str) {
-		return String(str || "")
-			.replace(/&/g, "&amp;")
-			.replace(/</g, "&lt;")
-			.replace(/>/g, "&gt;");
 	}
 }
 

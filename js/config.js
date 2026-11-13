@@ -1,11 +1,11 @@
 /**
  * js/config.js - Fuente única de verdad para la configuración por defecto,
- * metadatos de parámetros (rangos, pasos, etiquetas, secciones de UI y targets MIDI),
- * presets de resolución y utilidades compartidas entre sketch.js y display.js.
+ * metadatos de parámetros (rangos, pasos, etiquetas y secciones de UI),
+ * presets de resolución y utilidades de la ventana principal.
  */
 
 const UI_SECTIONS = {
-	dimensions: "0. Dimensiones Canvas // Salida CRT",
+	dimensions: "0. Dimensiones Canvas",
 	trunk: "1. Rama Principal (Gen 0)",
 	subBranches: "2. Sub-Ramas (Gen 1 o Sup.)",
 	space: "3. Superposición y Secuencia",
@@ -22,7 +22,7 @@ const CANVAS_PRESETS = [
  * Esquema declarativo unificado de todos los parámetros ajustables.
  */
 const PARAM_SCHEMA = {
-	// --- SECCIÓN 0: Dimensiones del Canvas y Salida CRT ---
+	// --- SECCIÓN 0: Dimensiones del Canvas ---
 	canvasWidth: {
 		kind: "param",
 		section: "dimensions",
@@ -32,7 +32,6 @@ const PARAM_SCHEMA = {
 		step: 10,
 		defaultValue: 800,
 		format: (v) => `${Math.round(v)} px`,
-		midiExpose: false,
 	},
 	canvasHeight: {
 		kind: "param",
@@ -43,14 +42,6 @@ const PARAM_SCHEMA = {
 		step: 10,
 		defaultValue: 600,
 		format: (v) => `${Math.round(v)} px`,
-		midiExpose: false,
-	},
-	tvFullScreen: {
-		kind: "boolean",
-		section: "dimensions",
-		label: "CRT: Llenar Pantalla Completa",
-		defaultValue: false,
-		midiExpose: false,
 	},
 
 	// --- SECCIÓN 1: Rama Principal (Gen 0) ---
@@ -62,7 +53,6 @@ const PARAM_SCHEMA = {
 		max: 280,
 		step: 5,
 		defaultValue: 140,
-		defaultBehavior: "absolute",
 		format: (v) => `${Math.round(v)} px`,
 	},
 	trunkCenterPull: {
@@ -73,7 +63,6 @@ const PARAM_SCHEMA = {
 		max: 0.25,
 		step: 0.005,
 		defaultValue: 0.095,
-		defaultBehavior: "absolute",
 		format: (v) => v.toFixed(3),
 	},
 	trunkBaseLength: {
@@ -84,7 +73,6 @@ const PARAM_SCHEMA = {
 		max: 1200,
 		step: 10,
 		defaultValue: 680,
-		defaultBehavior: "absolute",
 		format: (v) => `${Math.round(v)} px`,
 	},
 	trunkLengthRandomness: {
@@ -95,7 +83,6 @@ const PARAM_SCHEMA = {
 		max: 1.0,
 		step: 0.01,
 		defaultValue: 0.65,
-		defaultBehavior: "absolute",
 		format: (v) => `${Math.round(v * 100)}%`,
 	},
 	trunkMinLength: {
@@ -106,7 +93,6 @@ const PARAM_SCHEMA = {
 		max: 900,
 		step: 10,
 		defaultValue: 350,
-		defaultBehavior: "absolute",
 		format: (v) => `${Math.round(v)} px`,
 	},
 	trunkMaxLength: {
@@ -117,7 +103,6 @@ const PARAM_SCHEMA = {
 		max: 1500,
 		step: 10,
 		defaultValue: 1100,
-		defaultBehavior: "absolute",
 		format: (v) => `${Math.round(v)} px`,
 	},
 	trunkBranchRate: {
@@ -128,7 +113,6 @@ const PARAM_SCHEMA = {
 		max: 0.65,
 		step: 0.005,
 		defaultValue: 0.33,
-		defaultBehavior: "absolute",
 		format: (v) => `${Math.round(v * 100)}%`,
 	},
 
@@ -141,7 +125,6 @@ const PARAM_SCHEMA = {
 		max: 4.0,
 		step: 0.05,
 		defaultValue: 2.0,
-		defaultBehavior: "absolute",
 		format: (v) => `${v.toFixed(2)}x`,
 	},
 	subBranchRate: {
@@ -152,7 +135,6 @@ const PARAM_SCHEMA = {
 		max: 6.0,
 		step: 0.05,
 		defaultValue: 3.0,
-		defaultBehavior: "absolute",
 		format: (v) => `${v.toFixed(2)}x`,
 	},
 	subBranchLength: {
@@ -163,7 +145,6 @@ const PARAM_SCHEMA = {
 		max: 6.0,
 		step: 0.05,
 		defaultValue: 2.0,
-		defaultBehavior: "absolute",
 		format: (v) => `${v.toFixed(2)}x`,
 	},
 	subBranchForkChance: {
@@ -174,7 +155,6 @@ const PARAM_SCHEMA = {
 		max: 0.85,
 		step: 0.02,
 		defaultValue: 0.5,
-		defaultBehavior: "absolute",
 		format: (v) => `${Math.round(v * 100)}%`,
 	},
 	maxGeneration: {
@@ -185,7 +165,6 @@ const PARAM_SCHEMA = {
 		max: 8,
 		step: 1,
 		defaultValue: 6,
-		defaultBehavior: "absolute",
 		format: (v) => `Gen ${Math.round(v)}`,
 	},
 	angleVariance: {
@@ -196,7 +175,6 @@ const PARAM_SCHEMA = {
 		max: 1.15,
 		step: 0.02,
 		defaultValue: 0.5,
-		defaultBehavior: "absolute",
 		format: (v) => v.toFixed(2),
 	},
 
@@ -209,7 +187,6 @@ const PARAM_SCHEMA = {
 		max: 24,
 		step: 1,
 		defaultValue: 12,
-		defaultBehavior: "absolute",
 		format: (v) => `${Math.round(v)} ramas`,
 	},
 	overlapTolerance: {
@@ -220,7 +197,6 @@ const PARAM_SCHEMA = {
 		max: 1.0,
 		step: 0.02,
 		defaultValue: 0.6,
-		defaultBehavior: "absolute",
 		format: (v) => `${Math.round(v * 100)}%`,
 	},
 	spawnGraceSteps: {
@@ -231,7 +207,6 @@ const PARAM_SCHEMA = {
 		max: 48,
 		step: 2,
 		defaultValue: 22,
-		defaultBehavior: "absolute",
 		format: (v) => `${Math.round(v)} pasos`,
 	},
 	matureDesaturation: {
@@ -242,7 +217,6 @@ const PARAM_SCHEMA = {
 		max: 1.0,
 		step: 0.05,
 		defaultValue: 0.75,
-		defaultBehavior: "absolute",
 		format: (v) => `${Math.round(v * 100)}%`,
 	},
 	matureBrightness: {
@@ -253,7 +227,6 @@ const PARAM_SCHEMA = {
 		max: 1.0,
 		step: 0.05,
 		defaultValue: 0.75,
-		defaultBehavior: "absolute",
 		format: (v) => `${Math.round(v * 100)}%`,
 	},
 	matureGridRelief: {
@@ -264,7 +237,6 @@ const PARAM_SCHEMA = {
 		max: 0.95,
 		step: 0.05,
 		defaultValue: 0.7,
-		defaultBehavior: "absolute",
 		format: (v) => `-${Math.round(v * 100)}%`,
 	},
 	repulsionStrength: {
@@ -275,7 +247,6 @@ const PARAM_SCHEMA = {
 		max: 0.75,
 		step: 0.02,
 		defaultValue: 0.24,
-		defaultBehavior: "absolute",
 		format: (v) => v.toFixed(2),
 	},
 	saturationThreshold: {
@@ -286,7 +257,6 @@ const PARAM_SCHEMA = {
 		max: 18.0,
 		step: 0.5,
 		defaultValue: 8.5,
-		defaultBehavior: "absolute",
 		format: (v) => v.toFixed(1),
 	},
 	stepsPerFrame: {
@@ -297,7 +267,6 @@ const PARAM_SCHEMA = {
 		max: 18,
 		step: 1,
 		defaultValue: 5,
-		defaultBehavior: "absolute",
 		format: (v) => `${Math.round(v)}`,
 	},
 	simultaneousCount: {
@@ -308,7 +277,6 @@ const PARAM_SCHEMA = {
 		max: 4,
 		step: 1,
 		defaultValue: 1,
-		defaultBehavior: "absolute",
 		format: (v) => `${Math.round(v)} ramas`,
 	},
 
@@ -318,112 +286,48 @@ const PARAM_SCHEMA = {
 		section: "space",
 		label: "Garantizar Ramas Hijas (Gen 0-1)",
 		defaultValue: true,
-		defaultBehavior: "toggle",
 	},
 	simultaneousMode: {
 		kind: "boolean",
 		section: "space",
 		label: "Modo Simultáneo Auto (2-4) [6]",
 		defaultValue: false,
-		defaultBehavior: "toggle",
 	},
 	simultaneousRandom: {
 		kind: "boolean",
 		section: "space",
 		label: "Simultáneo Aleatorio (2 a 4)",
 		defaultValue: true,
-		defaultBehavior: "toggle",
 	},
 	fullScreen: {
 		kind: "boolean",
 		section: "space",
 		label: "Pantalla Completa [F]",
 		defaultValue: false,
-		midiExpose: false,
 	},
 	infiniteMode: {
 		kind: "boolean",
 		section: "space",
 		label: "Modo Infinito (Borra Antiguas)",
 		defaultValue: true,
-		defaultBehavior: "toggle",
 	},
 	autoSequence: {
 		kind: "boolean",
 		section: "space",
 		label: "Secuencia Automática de Esquinas",
 		defaultValue: true,
-		defaultBehavior: "toggle",
 	},
 	showDebugGrid: {
 		kind: "boolean",
 		section: "space",
 		label: "Ver Grilla de Densidad [G]",
 		defaultValue: false,
-		defaultBehavior: "toggle",
-	},
-};
-
-/**
- * Esquema de acciones performáticas discretas para UI, Teclado y MIDI.
- */
-const ACTION_SCHEMA = {
-	reset: {
-		kind: "action",
-		label: "Reiniciar Simulación [R]",
-		defaultBehavior: "momentary",
-	},
-	nextCorner: {
-		kind: "action",
-		label: "Siguiente Esquina [SPACE]",
-		defaultBehavior: "momentary",
-	},
-	burst2: {
-		kind: "action",
-		label: "Ráfaga x2 [1]",
-		defaultBehavior: "momentary",
-	},
-	burst3: {
-		kind: "action",
-		label: "Ráfaga x3 [2]",
-		defaultBehavior: "momentary",
-	},
-	burst4: {
-		kind: "action",
-		label: "Ráfaga x4 [3]",
-		defaultBehavior: "momentary",
-	},
-	bloom: {
-		kind: "action",
-		label: "Floración Capilar [4]",
-		defaultBehavior: "momentary",
-	},
-	shock: {
-		kind: "action",
-		label: "Sacudida Eléctrica [5]",
-		defaultBehavior: "momentary",
-	},
-	toggleSimultaneous: {
-		kind: "action",
-		label: "Alternar Simultáneo Auto [6]",
-		defaultBehavior: "toggle",
-	},
-	setState: {
-		kind: "action",
-		label: "Cambiar Estado [Q / W / E]",
-		defaultBehavior: "momentary",
-	},
-	save: {
-		kind: "action",
-		label: "Guardar PNG [S]",
-		defaultBehavior: "momentary",
 	},
 };
 
 const NON_STATE_PARAM_KEYS = new Set([
 	"canvasWidth",
 	"canvasHeight",
-	"tvFullScreen",
 	"fullScreen",
 	"showDebugGrid",
 ]);
@@ -600,59 +504,24 @@ function createConfig(overrides = {}) {
 }
 
 /**
- * Construye el catálogo SKETCH_TARGETS para el motor de mapeo MIDI a partir del esquema único.
- */
-function buildMidiSketchTargets() {
-	const targets = {};
-
-	for (const [key, meta] of Object.entries(PARAM_SCHEMA)) {
-		if (meta.midiExpose === false) continue;
-		if (meta.kind === "boolean") {
-			targets[key] = {
-				kind: "boolean",
-				label: meta.label,
-				min: 0,
-				max: 1,
-				defaultBehavior: meta.defaultBehavior || "toggle",
-			};
-		} else {
-			targets[key] = {
-				kind: "param",
-				label: meta.label,
-				min: meta.min,
-				max: meta.max,
-				step: meta.step,
-				defaultBehavior: meta.defaultBehavior || "absolute",
-			};
-		}
-	}
-
-	for (const [key, meta] of Object.entries(ACTION_SCHEMA)) {
-		targets[key] = { ...meta };
-	}
-
-	return targets;
-}
-
-/**
- * Dibuja el marco rectangular interno fino y sutil que delimita el área de colisión.
+ * Dibuja el marco rectangular interno fino directamente sobre el contexto 2D nativo
+ * para evitar el costo de push()/pop() y cambios de estado en p5.js en cada frame.
  */
 function drawInnerFrameShared(target, bounds, strokeColor) {
 	const { left, top, right, bottom } = bounds;
 	const [r, g, b, a] = strokeColor;
+	const ctx = target.drawingContext;
 
-	target.push();
-	target.blendMode(BLEND);
-	target.noFill();
-	target.stroke(r, g, b, a);
-	target.strokeWeight(1);
-	target.rect(left, top, right - left, bottom - top);
-	target.pop();
+	ctx.save();
+	ctx.globalCompositeOperation = "source-over";
+	ctx.strokeStyle = `rgba(${r},${g},${b},${a / 255})`;
+	ctx.lineWidth = 1;
+	ctx.strokeRect(left, top, right - left, bottom - top);
+	ctx.restore();
 }
 
 /**
- * Manejador unificado de atajos de teclado ([Q]/[W]/[E], [1]-[6], [R], [S], [F], [P], [G], [H], [SPACE])
- * compartido entre la ventana principal (sketch.js) y la salida CRT (display.js).
+ * Manejador de atajos de teclado ([Q]/[W]/[E], [1]-[6], [R], [S], [F], [G], [H], [SPACE]).
  */
 function handleSharedKeyPressed(keyStr, handlers) {
 	switch (keyStr) {
@@ -698,10 +567,6 @@ function handleSharedKeyPressed(keyStr, handlers) {
 		case "F":
 			handlers.onToggleFullScreen?.();
 			break;
-		case "p":
-		case "P":
-			handlers.onToggleTV?.();
-			break;
 		case "g":
 		case "G":
 			handlers.onToggleDebugGrid?.();
@@ -728,12 +593,10 @@ function handleSharedKeyReleased(keyStr, handlers) {
 window.UI_SECTIONS = UI_SECTIONS;
 window.CANVAS_PRESETS = CANVAS_PRESETS;
 window.PARAM_SCHEMA = PARAM_SCHEMA;
-window.ACTION_SCHEMA = ACTION_SCHEMA;
 window.PERFORMANCE_STATES = PERFORMANCE_STATES;
 window.createConfig = createConfig;
 window.getExportableConfigSnapshot = getExportableConfigSnapshot;
 window.applyPerformanceStateParams = applyPerformanceStateParams;
-window.buildMidiSketchTargets = buildMidiSketchTargets;
 window.drawInnerFrameShared = drawInnerFrameShared;
 window.handleSharedKeyPressed = handleSharedKeyPressed;
 window.handleSharedKeyReleased = handleSharedKeyReleased;
