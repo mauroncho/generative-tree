@@ -164,10 +164,13 @@ class TVBridge {
 
 			case "REQUEST_CONFIG":
 				if (!this.isDisplay && window.CONFIG) {
+					const gm = window.appState?.growthManager;
 					this.post({
 						type: "SYNC_ALL",
 						config: window.CONFIG,
 						seed: window.appState ? window.appState.seed : null,
+						activeStateId: gm ? gm.activeStateId : "Q",
+						pendingStateId: gm ? gm.pendingStateId : null,
 					});
 				}
 				break;
@@ -175,7 +178,12 @@ class TVBridge {
 			case "SYNC_ALL":
 				if (this.isDisplay) {
 					for (const cb of this.actionListeners) {
-						cb("syncAll", { config: msg.config, seed: msg.seed });
+						cb("syncAll", {
+							config: msg.config,
+							seed: msg.seed,
+							activeStateId: msg.activeStateId,
+							pendingStateId: msg.pendingStateId,
+						});
 					}
 				}
 				break;

@@ -1,22 +1,29 @@
 /**
- * UIPanel - Interfaz flotante ocultable ([H]) para controlar en tiempo real
- * los parámetros de la rama principal (Gen 0), sub-ramas (Gen 1+),
- * superposición espacial, límite de ramas visibles, modo infinito y WebMIDI.
- *
- * Construye todas las secciones de sliders y checkboxes de forma declarativa
- * a partir de window.PARAM_SCHEMA y window.UI_SECTIONS (js/config.js).
+ * UIPanel - Interfaz flotante compacta ocultable ([H]) orientada a performance en vivo.
+ * Muestra el estado activo/pendiente ([Q]/[W]/[E]), las acciones performáticas ([1]-[6], [SPACE])
+ * y un menú desplegable colapsado por defecto con botones de sistema, copiar parámetros (JSON),
+ * todos los controles editables de PARAM_SCHEMA y el módulo MIDI opcional.
  */
 class UIPanel {
 	constructor(config, callbacks) {
 		this.config = config;
 		this.callbacks = callbacks;
 		this.isVisible = true;
+		this.isParamsOpen = false;
+		this.isMidiOpen = false;
 		this.container = null;
 		this.badgeEl = null;
 		this.cornerEl = null;
 		this.statsEl = null;
 		this.btnTV = null;
 		this.btnFullScreen = null;
+		this.btnCopyParams = null;
+		this.drawerToggleBtn = null;
+		this.drawerEl = null;
+		this.stateStatusEl = null;
+		this.stateButtons = {};
+		this.activeStateId = "Q";
+		this.pendingStateId = null;
 		this.isTVConnected = false;
 
 		this.sliders = new Map();
@@ -28,31 +35,35 @@ class UIPanel {
 
 	buildDOM() {
 		this.container = document.createElement("aside");
-		this.container.className = "ui-panel";
+		this.container.className = "ui-panel ui-panel-compact";
 
 		const stopProp = (e) => e.stopPropagation();
 		this.container.addEventListener("mousedown", stopProp);
 		this.container.addEventListener("pointerdown", stopProp);
 		this.container.addEventListener("wheel", stopProp);
 
-		// Cabecera
+		// Cabecera compacta
 		const header = document.createElement("div");
 		header.className = "ui-header";
 
 		const title = document.createElement("span");
 		title.className = "ui-title";
-		title.textContent = "LICHTENBERG // CONTROLES";
+		title.textContent = "LICHTENBERG // LIVE";
 
 		const hideBtn = document.createElement("button");
 		hideBtn.className = "ui-hide-btn";
-		hideBtn.textContent = "[H] Ocultar";
-		hideBtn.addEventListener("click", () => this.toggle());
+		hideBtn.textContent = "[H]";
+		hideBtn.title = "Ocultar / Mostrar UI [H]";
+		hideBtn.addEventListener("click", () => {
+			hideBtn.blur();
+			this.toggle();
+		});
 
 		header.appendChild(title);
 		header.appendChild(hideBtn);
 		this.container.appendChild(header);
 
-		// Telemetría
+		// Telemetría compacta
 		const telemetry = document.createElement("div");
 		telemetry.className = "ui-telemetry";
 
@@ -75,46 +86,130 @@ class UIPanel {
 		telemetry.appendChild(this.statsEl);
 		this.container.appendChild(telemetry);
 
-		// Botones principales de acción
-		const actionsRow = document.createElement("div");
-		actionsRow.className = "ui-actions";
+		// Bloque 1: Selector de Estado Performático [Q / W / E]
+		this.buildStateSection();
 
-		const btnReset = this.createButton("Reiniciar [R]", () =>
-			this.callbacks.onReset?.(),
-		);
-		const btnNext = this.createButton("Sig. Esquina [SPACE]", () =>
-			this.callbacks.onNextCorner?.(),
-		);
-		this.btnTV = this.createButton("Salida CRT [P]", () =>
-			this.callbacks.onToggleTV?.(),
-		);
-		this.btnTV.classList.add("tv-btn");
-
-		this.btnFullScreen = this.createButton("Pantalla Completa [F]", () =>
-			this.callbacks.onToggleFullScreen?.(),
-		);
-
-		actionsRow.appendChild(btnReset);
-		actionsRow.appendChild(btnNext);
-		actionsRow.appendChild(this.btnTV);
-		actionsRow.appendChild(this.btnFullScreen);
-		this.container.appendChild(actionsRow);
-
-		// SECCIÓN PERFORMÁTICA: Acciones Rápidas [1] al [6]
+		// Bloque 2: Acciones Performáticas [1–6] + [SPACE]
 		this.buildPerformativeSection();
 
-		// SECCIÓN MIDI: Controlador WebMidi.js y Modo Diagnóstico
-		this.buildMidiSection();
-
-		// SECCIONES 0 a 3: Construidas declarativamente desde PARAM_SCHEMA
-		this.buildSchemaSections();
+		// Bloque 3: Menú desplegable colapsado (Sistema, Copiar Params, Parámetros editables, MIDI)
+		this.buildCollapsibleDrawer();
 
 		document.body.appendChild(this.container);
+		this.setPerformanceState(this.activeStateId, this.pendingStateId);
 		this.syncCheckboxes();
 	}
 
+	buildStateSection() {
+		const sec = document.createElement("div");
+		sec.className = "ui-section ui-section-tight";
+
+		const titleRow = document.createElement("div");
+		titleRow.className = "ui-section-header-row";
+
+		const title = document.createElement("span");
+		title.className = "ui-section-title";
+		title.textContent = "Estado [Q / W / E]";
+
+		this.stateStatusEl = document.createElement("span");
+		this.stateStatusEl.className = "ui-state-status";
+		this.stateStatusEl.textContent = "Activo: Q";
+
+		titleRow.appendChild(title);
+		titleRow.appendChild(this.stateStatusEl);
+		sec.appendChild(titleRow);
+
+		const stateGrid = document.createElement("div");
+		stateGrid.className = "ui-state-grid";
+
+		const states = window.PERFORMANCE_STATES || {
+			Q: { id: "Q", key: "Q", label: "Estado Q", params: {} },
+			W: { id: "W", key: "W", label: "Estado W", params: {} },
+			E: { id: "E", key: "E", label: "Estado E", params: {} },
+		};
+
+		for (const id of ["Q", "W", "E"]) {
+			const def = states[id] || { id, key: id, label: `Estado ${id}`, params: {} };
+			const btn = document.createElement("button");
+			btn.className = "ui-btn ui-state-btn";
+			const hasParams = def.params && Object.keys(def.params).length > 0;
+			btn.title = hasParams
+				? `${def.label} (al iniciar próxima rama)`
+				: `${def.label} (sin parámetros asignados aún)`;
+
+			const keySpan = document.createElement("span");
+			keySpan.className = "ui-state-key";
+			keySpan.textContent = `[${def.key}]`;
+
+			const tagSpan = document.createElement("span");
+			tagSpan.className = "ui-state-tag";
+			tagSpan.textContent = hasParams ? "LISTO" : "VACÍO";
+
+			btn.appendChild(keySpan);
+			btn.appendChild(tagSpan);
+
+			btn.addEventListener("click", () => {
+				btn.blur();
+				this.callbacks.onSelectState?.(id);
+			});
+
+			this.stateButtons[id] = { btn, tagSpan };
+			stateGrid.appendChild(btn);
+		}
+
+		sec.appendChild(stateGrid);
+		this.container.appendChild(sec);
+	}
+
+	setPerformanceState(activeId, pendingId = null) {
+		this.activeStateId = activeId || "Q";
+		this.pendingStateId = pendingId || null;
+
+		const states = window.PERFORMANCE_STATES || {};
+
+		for (const id of ["Q", "W", "E"]) {
+			const entry = this.stateButtons[id];
+			if (!entry) continue;
+			const { btn, tagSpan } = entry;
+			const isActive = id === this.activeStateId;
+			const isPending = id === this.pendingStateId;
+			const def = states[id];
+			const hasParams = Boolean(
+				def?.params && Object.keys(def.params).length > 0,
+			);
+
+			btn.classList.toggle("state-active", isActive);
+			btn.classList.toggle("state-pending", isPending);
+
+			if (isPending) {
+				tagSpan.textContent = "PRÓX.";
+			} else if (isActive) {
+				tagSpan.textContent = "ACTIVO";
+			} else {
+				tagSpan.textContent = hasParams ? "LISTO" : "VACÍO";
+			}
+		}
+
+		if (this.stateStatusEl) {
+			if (this.pendingStateId) {
+				this.stateStatusEl.textContent = `${this.activeStateId} → ${this.pendingStateId} (próx. rama)`;
+				this.stateStatusEl.classList.add("is-pending");
+			} else {
+				this.stateStatusEl.textContent = `Activo: ${this.activeStateId}`;
+				this.stateStatusEl.classList.remove("is-pending");
+			}
+		}
+	}
+
 	buildPerformativeSection() {
-		const secPerf = this.createSection("⚡ Acciones Performáticas [1–6]");
+		const secPerf = document.createElement("div");
+		secPerf.className = "ui-section ui-section-tight";
+
+		const h = document.createElement("div");
+		h.className = "ui-section-title";
+		h.textContent = "⚡ Acciones Performáticas";
+		secPerf.appendChild(h);
+
 		const perfGrid = document.createElement("div");
 		perfGrid.className = "ui-perf-grid";
 
@@ -126,12 +221,12 @@ class UIPanel {
 			},
 			{
 				num: 2,
-				label: "[2] ⚡⚡ Ráfaga x3",
+				label: "[2] ⚡ Ráfaga x3",
 				action: () => this.callbacks.onBurst?.(3, 2),
 			},
 			{
 				num: 3,
-				label: "[3] ⚡⚡⚡ Ráfaga x4",
+				label: "[3] ⚡ Ráfaga x4",
 				action: () => this.callbacks.onBurst?.(4, 3),
 			},
 			{
@@ -141,12 +236,12 @@ class UIPanel {
 			},
 			{
 				num: 5,
-				label: "[5] 🌪️ Sacudida Eléc.",
+				label: "[5] 🌪️ Sacudida",
 				action: () => this.callbacks.onElectricShock?.(),
 			},
 			{
 				num: 6,
-				label: "[6] 🔄 Sim. Auto (2-4)",
+				label: "[6] 🔄 Sim. Auto",
 				action: () => this.callbacks.onToggleSimultaneous?.(),
 			},
 		];
@@ -155,19 +250,165 @@ class UIPanel {
 			const btn = document.createElement("button");
 			btn.className = "ui-btn ui-perf-btn";
 			btn.textContent = item.label;
-			btn.addEventListener("click", item.action);
+			btn.addEventListener("click", () => {
+				btn.blur();
+				item.action();
+			});
 			this.perfButtons[item.num] = btn;
 			perfGrid.appendChild(btn);
 		}
 
 		secPerf.appendChild(perfGrid);
+
+		const btnNext = this.createButton("[SPACE] Sig. Esquina", () =>
+			this.callbacks.onNextCorner?.(),
+		);
+		btnNext.classList.add("ui-perf-btn", "ui-perf-space-btn");
+		secPerf.appendChild(btnNext);
+
 		this.container.appendChild(secPerf);
+	}
+
+	buildCollapsibleDrawer() {
+		const wrapper = document.createElement("div");
+		wrapper.className = "ui-section ui-section-tight ui-drawer-wrapper";
+
+		this.drawerToggleBtn = document.createElement("button");
+		this.drawerToggleBtn.className = "ui-drawer-toggle";
+		this.drawerToggleBtn.textContent = "▸ Parámetros y Sistema";
+		this.drawerToggleBtn.addEventListener("click", () => {
+			this.drawerToggleBtn.blur();
+			this.toggleParamsDrawer();
+		});
+		wrapper.appendChild(this.drawerToggleBtn);
+
+		this.drawerEl = document.createElement("div");
+		this.drawerEl.className = "ui-drawer hidden";
+
+		// 1. Botón para copiar snapshot de parámetros actuales
+		this.btnCopyParams = this.createButton("📋 Copiar Parámetros (JSON)", () =>
+			this.copyCurrentParams(),
+		);
+		this.btnCopyParams.classList.add("ui-copy-params-btn");
+		this.drawerEl.appendChild(this.btnCopyParams);
+
+		// 2. Botones de utilidad / sistema dentro del desplegable
+		const sysGrid = document.createElement("div");
+		sysGrid.className = "ui-actions";
+
+		const btnReset = this.createButton("Reiniciar [R]", () =>
+			this.callbacks.onReset?.(),
+		);
+		const btnSave = this.createButton("Guardar PNG [S]", () =>
+			this.callbacks.onSave?.(),
+		);
+		this.btnTV = this.createButton("Salida CRT [P]", () =>
+			this.callbacks.onToggleTV?.(),
+		);
+		this.btnTV.classList.add("tv-btn");
+
+		this.btnFullScreen = this.createButton("Full Screen [F]", () =>
+			this.callbacks.onToggleFullScreen?.(),
+		);
+
+		sysGrid.appendChild(btnReset);
+		sysGrid.appendChild(btnSave);
+		sysGrid.appendChild(this.btnTV);
+		sysGrid.appendChild(this.btnFullScreen);
+		this.drawerEl.appendChild(sysGrid);
+
+		// 3. Todos los parámetros actuales editables (PARAM_SCHEMA)
+		this.buildSchemaSections(this.drawerEl);
+
+		// 4. Sección MIDI opcional colapsada aparte (para no borrar la integración)
+		const midiToggle = document.createElement("button");
+		midiToggle.className = "ui-drawer-toggle ui-midi-subtoggle";
+		midiToggle.textContent = "▸ MIDI (Opcional)";
+		this.drawerEl.appendChild(midiToggle);
+
+		const midiHolder = document.createElement("div");
+		midiHolder.className = "hidden";
+		this.buildMidiSection(midiHolder);
+		this.drawerEl.appendChild(midiHolder);
+
+		midiToggle.addEventListener("click", () => {
+			midiToggle.blur();
+			this.isMidiOpen = !this.isMidiOpen;
+			midiHolder.classList.toggle("hidden", !this.isMidiOpen);
+			midiToggle.textContent = this.isMidiOpen
+				? "▾ MIDI (Opcional)"
+				: "▸ MIDI (Opcional)";
+		});
+
+		wrapper.appendChild(this.drawerEl);
+		this.container.appendChild(wrapper);
+	}
+
+	toggleParamsDrawer(forceOpen) {
+		this.isParamsOpen =
+			typeof forceOpen === "boolean" ? forceOpen : !this.isParamsOpen;
+		if (this.drawerEl) {
+			this.drawerEl.classList.toggle("hidden", !this.isParamsOpen);
+		}
+		if (this.drawerToggleBtn) {
+			this.drawerToggleBtn.textContent = this.isParamsOpen
+				? "▾ Parámetros y Sistema"
+				: "▸ Parámetros y Sistema";
+			this.drawerToggleBtn.classList.toggle("open", this.isParamsOpen);
+		}
+	}
+
+	copyCurrentParams() {
+		const snapshot = window.getExportableConfigSnapshot
+			? window.getExportableConfigSnapshot(this.config)
+			: { ...this.config };
+		const jsonText = JSON.stringify(snapshot, null, 2);
+
+		const showCopiedFeedback = () => {
+			if (!this.btnCopyParams) return;
+			const prev = "📋 Copiar Parámetros (JSON)";
+			this.btnCopyParams.textContent = "✓ ¡Parámetros copiados!";
+			this.btnCopyParams.classList.add("copied");
+			clearTimeout(this.btnCopyParams._copyTimeout);
+			this.btnCopyParams._copyTimeout = setTimeout(() => {
+				this.btnCopyParams.textContent = prev;
+				this.btnCopyParams.classList.remove("copied");
+			}, 1500);
+		};
+
+		const fallbackCopy = () => {
+			const ta = document.createElement("textarea");
+			ta.value = jsonText;
+			ta.style.position = "fixed";
+			ta.style.opacity = "0";
+			document.body.appendChild(ta);
+			ta.select();
+			try {
+				document.execCommand("copy");
+				showCopiedFeedback();
+			} catch (_) {}
+			document.body.removeChild(ta);
+		};
+
+		if (navigator.clipboard?.writeText) {
+			navigator.clipboard
+				.writeText(jsonText)
+				.then(showCopiedFeedback)
+				.catch(fallbackCopy);
+		} else {
+			fallbackCopy();
+		}
+
+		console.info(
+			`[Estado ${this.activeStateId}] Parámetros actuales:\n`,
+			jsonText,
+		);
 	}
 
 	/**
 	 * Genera las secciones 0, 1, 2 y 3 iterando sobre window.UI_SECTIONS y window.PARAM_SCHEMA.
 	 */
-	buildSchemaSections() {
+	buildSchemaSections(targetParent = this.container) {
 		const sectionsMeta = window.UI_SECTIONS || {};
 		const schema = window.PARAM_SCHEMA || {};
 		const presets = window.CANVAS_PRESETS || [];
@@ -203,7 +444,10 @@ class UIPanel {
 						const btn = document.createElement("button");
 						btn.className = "ui-preset-btn";
 						btn.textContent = p.label;
-						btn.addEventListener("click", () => this.setDimensions(p.w, p.h));
+						btn.addEventListener("click", () => {
+							btn.blur();
+							this.setDimensions(p.w, p.h);
+						});
 						presetRow.appendChild(btn);
 					}
 					parentSec.appendChild(presetRow);
@@ -232,7 +476,7 @@ class UIPanel {
 		}
 
 		for (const secEl of Object.values(sectionElements)) {
-			this.container.appendChild(secEl);
+			targetParent.appendChild(secEl);
 		}
 	}
 
@@ -250,7 +494,10 @@ class UIPanel {
 		const btn = document.createElement("button");
 		btn.className = "ui-btn";
 		btn.textContent = label;
-		btn.addEventListener("click", onClick);
+		btn.addEventListener("click", () => {
+			btn.blur();
+			onClick?.();
+		});
 		return btn;
 	}
 
@@ -302,13 +549,24 @@ class UIPanel {
 		}
 	}
 
+	syncAllControls() {
+		for (const [key, sliderRef] of this.sliders.entries()) {
+			const val = this.config[key];
+			if (val !== undefined) {
+				sliderRef.input.value = val;
+				sliderRef.valSpan.textContent = sliderRef.format(val);
+			}
+		}
+		this.syncCheckboxes();
+	}
+
 	setDimensions(w, h) {
 		this.config.canvasWidth = w;
 		this.config.canvasHeight = h;
 		this.updateSlider("canvasWidth", w);
 		this.updateSlider("canvasHeight", h);
 		if (this.btnFullScreen && !this.config.fullScreen) {
-			this.btnFullScreen.textContent = "Pantalla Completa [F]";
+			this.btnFullScreen.textContent = "Full Screen [F]";
 		}
 		this.callbacks.onParamChange?.("canvasWidth", w);
 		this.callbacks.onParamChange?.("canvasHeight", h);
@@ -347,8 +605,8 @@ class UIPanel {
 			const isSim = Boolean(this.config.simultaneousMode);
 			this.perfButtons[6].classList.toggle("active", isSim);
 			this.perfButtons[6].textContent = isSim
-				? "[6] 🔄 Sim. Auto: ON"
-				: "[6] 🔄 Sim. Auto (2-4)";
+				? "[6] 🔄 Sim: ON"
+				: "[6] 🔄 Sim. Auto";
 		}
 
 		if (this.btnFullScreen) {
@@ -356,7 +614,7 @@ class UIPanel {
 			this.btnFullScreen.classList.toggle("active", isFS);
 			this.btnFullScreen.textContent = isFS
 				? `Ventana ${this.config.canvasWidth}x${this.config.canvasHeight} [F]`
-				: "Pantalla Completa [F]";
+				: "Full Screen [F]";
 		}
 	}
 
@@ -465,7 +723,7 @@ class UIPanel {
 	/**
 	 * Construye la sección de interfaz para control MIDI y diagnóstico en vivo.
 	 */
-	buildMidiSection() {
+	buildMidiSection(targetParent = this.container) {
 		this.midiSectionEl = this.createSection("🎹 Control MIDI // WebMidi.js");
 
 		// 1. Fila de estado de conexión y toggle de recepción
@@ -614,7 +872,7 @@ class UIPanel {
 		this.midiDiagContainer.appendChild(diagBtns);
 
 		this.midiSectionEl.appendChild(this.midiDiagContainer);
-		this.container.appendChild(this.midiSectionEl);
+		targetParent.appendChild(this.midiSectionEl);
 	}
 
 	/**

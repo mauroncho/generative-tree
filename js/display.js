@@ -145,6 +145,22 @@ function dispatchTVAction(action, data = null, notifyPC = true) {
 				displayState.bridge.sendAction("toggleSimultaneous");
 			}
 			break;
+		case "setState": {
+			const stateId = String(data?.stateId || "").toUpperCase();
+			if (stateId) {
+				displayState.growthManager.requestPerformanceState(
+					stateId,
+					Boolean(data?.immediate),
+				);
+				if (notifyPC && displayState.bridge) {
+					displayState.bridge.sendAction("setState", {
+						stateId,
+						immediate: Boolean(data?.immediate),
+					});
+				}
+			}
+			break;
+		}
 		case "save":
 			saveHighResPNG();
 			break;
@@ -154,6 +170,11 @@ function dispatchTVAction(action, data = null, notifyPC = true) {
 		case "syncAll":
 			if (data && data.config) {
 				Object.assign(TV_CONFIG, data.config);
+				if (displayState.growthManager && data.activeStateId) {
+					displayState.growthManager.activeStateId = data.activeStateId;
+					displayState.growthManager.pendingStateId =
+						data.pendingStateId || null;
+				}
 				updateDimensions(data.seed);
 			}
 			break;

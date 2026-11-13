@@ -26,6 +26,10 @@ class GrowthManager {
 		this.bloomSustainCounter = 0;
 		this._lastMatureBrightness = config.matureBrightness ?? 0.75;
 
+		this.activeStateId = "Q";
+		this.pendingStateId = null;
+		this.onStateChange = null;
+
 		this.cornerNames = [
 			"Sup-Izquierda",
 			"Inf-Derecha",
@@ -138,9 +142,53 @@ class GrowthManager {
 	}
 
 	/**
+	 * Solicita cambiar al estado performático (Q / W / E).
+	 * Si hay ramas creciendo, queda en cola y se aplica apenas comienza una nueva rama.
+	 */
+	requestPerformanceState(stateId, immediate = false) {
+		const id = String(stateId || "").toUpperCase();
+		if (!window.PERFORMANCE_STATES?.[id]) return;
+
+		if (
+			immediate ||
+			(this.activeTips.length === 0 && this.state === "COMPLETED")
+		) {
+			this._commitPerformanceState(id);
+			return;
+		}
+
+		if (id === this.activeStateId) {
+			if (this.pendingStateId) {
+				this.pendingStateId = null;
+				this.onStateChange?.(this.activeStateId, null, false);
+			}
+			return;
+		}
+
+		if (this.pendingStateId === id) return;
+		this.pendingStateId = id;
+		this.onStateChange?.(this.activeStateId, this.pendingStateId, false);
+	}
+
+	_commitPendingStateIfAny() {
+		if (!this.pendingStateId) return;
+		this._commitPerformanceState(this.pendingStateId);
+	}
+
+	_commitPerformanceState(stateId) {
+		this.activeStateId = stateId;
+		this.pendingStateId = null;
+		const changedKeys = window.applyPerformanceStateParams
+			? window.applyPerformanceStateParams(this.config, stateId)
+			: [];
+		this.onStateChange?.(this.activeStateId, null, changedKeys.length > 0);
+	}
+
+	/**
 	 * Dispara la siguiente tanda automática (1 o entre 2 y 4 esquinas simultáneas).
 	 */
 	triggerNextAutoBatch(isInitial = false) {
+		this._commitPendingStateIfAny();
 		const count = this.computeAutoBatchCount();
 		this.triggerSimultaneousBurst(count, isInitial);
 	}
@@ -156,6 +204,7 @@ class GrowthManager {
 	 * Dispara entre 1 y 4 ramas maestras al mismo tiempo desde esquinas distintas ([1], [2], [3]).
 	 */
 	triggerSimultaneousBurst(count = 2, startFromZero = false) {
+		this._commitPendingStateIfAny();
 		const burstCount = constrain(Math.round(count), 1, 4);
 		this.lastBatchCount = burstCount;
 		this.state = "GROWING";

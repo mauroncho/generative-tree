@@ -38,6 +38,18 @@ function setup() {
 		CONFIG.frameMargin,
 	);
 	appState.growthManager = new GrowthManager(appState.grid, CONFIG);
+	appState.growthManager.onStateChange = (
+		activeId,
+		pendingId,
+		didApplyParams,
+	) => {
+		if (appState.uiPanel) {
+			appState.uiPanel.setPerformanceState(activeId, pendingId);
+			if (didApplyParams) {
+				appState.uiPanel.syncAllControls();
+			}
+		}
+	};
 
 	// Inicializar puente de sincronización con la pantalla TV
 	appState.tvBridge = new TVBridge(false);
@@ -57,6 +69,8 @@ function setup() {
 
 	// Inicializar interfaz de controles ocultable ([H])
 	appState.uiPanel = new UIPanel(CONFIG, {
+		onSelectState: (stateId) =>
+			dispatchAction("setState", { stateId }, true),
 		onReset: () => dispatchAction("reset", null, true),
 		onNextCorner: () => dispatchAction("nextCorner", null, true),
 		onBurst: (count, btnNum) =>
@@ -94,6 +108,12 @@ function setup() {
 	});
 
 	resetSimulation();
+	if (appState.uiPanel && appState.growthManager) {
+		appState.uiPanel.setPerformanceState(
+			appState.growthManager.activeStateId,
+			appState.growthManager.pendingStateId,
+		);
+	}
 	initMidiIntegration();
 }
 
@@ -149,6 +169,22 @@ function dispatchAction(action, data = null, notifyTV = true) {
 		case "toggleSimultaneous":
 			toggleSimultaneousMode(notifyTV);
 			break;
+		case "setState": {
+			const stateId = String(data?.stateId || "").toUpperCase();
+			if (stateId) {
+				appState.growthManager.requestPerformanceState(
+					stateId,
+					Boolean(data?.immediate),
+				);
+				if (notifyTV && appState.tvBridge) {
+					appState.tvBridge.sendAction("setState", {
+						stateId,
+						immediate: Boolean(data?.immediate),
+					});
+				}
+			}
+			break;
+		}
 		case "save":
 			saveHighResPNG();
 			if (notifyTV && appState.tvBridge) {
